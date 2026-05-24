@@ -1,0 +1,10 @@
+{
+  "name": "Minecraft Survival Assistant",
+  "short_name": "MSA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#05080a",
+  "theme_color": "#071016",
+  "description": "Application locale pour piloter un bot Minecraft survival assistant.",
+  "icons": []
+}

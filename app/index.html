@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#071016" />
+    <title>Minecraft Survival Assistant</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">MSA</div>
+          <div>
+            <h1>Minecraft Survival Assistant</h1>
+            <p>Local control deck</p>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="Navigation">
+          <button class="nav-item active" data-panel="overview">Vue globale</button>
+          <button class="nav-item" data-panel="commands">Commandes</button>
+          <button class="nav-item" data-panel="blueprints">Blueprints</button>
+          <button class="nav-item" data-panel="settings">Configuration</button>
+        </nav>
+
+        <div class="bot-controls">
+          <div class="status-pill" id="bot-status-pill">Bot hors ligne</div>
+          <button class="primary-action" id="start-bot">Demarrer bot</button>
+          <button class="ghost-action" id="stop-bot">Arreter bot</button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="hero-panel">
+          <div>
+            <p class="eyebrow">Assistant survival local</p>
+            <h2>Un cockpit clair pour piloter ton bot Minecraft.</h2>
+          </div>
+          <div class="hero-stats">
+            <div>
+              <span id="command-count">0</span>
+              <small>commandes</small>
+            </div>
+            <div>
+              <span id="blueprint-count">0</span>
+              <small>modeles</small>
+            </div>
+            <div>
+              <span id="base-state">--</span>
+              <small>base</small>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel active" id="overview">
+          <div class="grid-3">
+            <article class="metric">
+              <span>Serveur</span>
+              <strong id="server-target">--</strong>
+            </article>
+            <article class="metric">
+              <span>Mission</span>
+              <strong id="mission-state">--</strong>
+            </article>
+            <article class="metric">
+              <span>Protection base</span>
+              <strong id="protection-state">--</strong>
+            </article>
+          </div>
+
+          <div class="split">
+            <article class="surface">
+              <div class="surface-head">
+                <h3>Journal bot</h3>
+                <button class="icon-button" id="refresh">Rafraichir</button>
+              </div>
+              <pre class="log-output" id="logs">Chargement...</pre>
+            </article>
+
+            <article class="surface">
+              <div class="surface-head">
+                <h3>Memoire</h3>
+              </div>
+              <div class="memory-list" id="memory-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel" id="commands">
+          <div class="toolbar">
+            <input id="command-search" type="search" placeholder="Chercher une commande..." />
+            <button class="ghost-action" id="copy-help">Copier aide rapide</button>
+          </div>
+          <div class="command-grid" id="command-grid"></div>
+        </section>
+
+        <section class="panel" id="blueprints">
+          <div class="surface">
+            <div class="surface-head">
+              <h3>Modeles disponibles</h3>
+              <p>Ajoute des modeles avec <code>npm run console</code>.</p>
+            </div>
+            <div class="blueprint-grid" id="blueprint-grid"></div>
+          </div>
+        </section>
+
+        <section class="panel" id="settings">
+          <div class="surface">
+            <div class="surface-head">
+              <h3>Configuration active</h3>
+              <p>Lecture seule pour cette premiere version.</p>
+            </div>
+            <pre class="config-output" id="config-output">{}</pre>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

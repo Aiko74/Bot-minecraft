@@ -1,0 +1,45 @@
+{
+  "name": "sugar-cane-farm",
+  "description": "Ferme canne a sucre 9x2x7 avec eau au centre et sable sur les cotes.",
+  "size": [9, 2, 7],
+  "origin": [0, 0, 0],
+  "materials": {
+    "sand": 28,
+    "water_bucket": 1,
+    "oak_slab": 5,
+    "torch": 4
+  },
+  "legend": {
+    " ": "air",
+    "S": "sand",
+    "W": "water",
+    "H": "oak_slab",
+    "T": "torch"
+  },
+  "layers": [
+    {
+      "y": 0,
+      "rows": [
+        "SSSSSSSSS",
+        "S   W   S",
+        "S   W   S",
+        "S   W   S",
+        "S   W   S",
+        "S   W   S",
+        "SSSSSSSSS"
+      ]
+    },
+    {
+      "y": 1,
+      "rows": [
+        "T       T",
+        "    H    ",
+        "    H    ",
+        "    H    ",
+        "    H    ",
+        "    H    ",
+        "T       T"
+      ]
+    }
+  ]
+}

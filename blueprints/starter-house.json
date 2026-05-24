@@ -1,0 +1,83 @@
+{
+  "name": "starter-house",
+  "description": "Petite maison de depart 7x5x7. Format en couches pour le futur module de construction.",
+  "size": [7, 5, 7],
+  "origin": [0, 0, 0],
+  "materials": {
+    "cobblestone": 49,
+    "oak_planks": 119,
+    "glass_pane": 8,
+    "oak_door": 1,
+    "torch": 2
+  },
+  "legend": {
+    " ": "air",
+    "C": "cobblestone",
+    "P": "oak_planks",
+    "G": "glass_pane",
+    "D": "oak_door",
+    "T": "torch"
+  },
+  "layers": [
+    {
+      "y": 0,
+      "rows": [
+        "CCCCCCC",
+        "CCCCCCC",
+        "CCCCCCC",
+        "CCCCCCC",
+        "CCCCCCC",
+        "CCCCCCC",
+        "CCCCCCC"
+      ]
+    },
+    {
+      "y": 1,
+      "rows": [
+        "PPPPPPP",
+        "P     P",
+        "P G G P",
+        "P     P",
+        "P G G P",
+        "P     P",
+        "PPPDPPP"
+      ]
+    },
+    {
+      "y": 2,
+      "rows": [
+        "PPPPPPP",
+        "P     P",
+        "P G G P",
+        "P  T  P",
+        "P G G P",
+        "P     P",
+        "PPP PPP"
+      ]
+    },
+    {
+      "y": 3,
+      "rows": [
+        "PPPPPPP",
+        "P     P",
+        "P     P",
+        "P  T  P",
+        "P     P",
+        "P     P",
+        "PPPPPPP"
+      ]
+    },
+    {
+      "y": 4,
+      "rows": [
+        "PPPPPPP",
+        "PPPPPPP",
+        "PPPPPPP",
+        "PPPPPPP",
+        "PPPPPPP",
+        "PPPPPPP",
+        "PPPPPPP"
+      ]
+    }
+  ]
+}

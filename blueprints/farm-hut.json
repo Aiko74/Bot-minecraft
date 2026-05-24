@@ -1,0 +1,63 @@
+{
+  "name": "farm-hut",
+  "description": "Petit abri agricole pour coffre de ferme et zone de repos.",
+  "size": [5, 4, 5],
+  "origin": [0, 0, 0],
+  "materials": {
+    "oak_planks": 68,
+    "oak_log": 8,
+    "glass_pane": 4,
+    "chest": 1,
+    "torch": 1
+  },
+  "legend": {
+    " ": "air",
+    "L": "oak_log",
+    "P": "oak_planks",
+    "G": "glass_pane",
+    "C": "chest",
+    "T": "torch"
+  },
+  "layers": [
+    {
+      "y": 0,
+      "rows": [
+        "PPPPP",
+        "PPPPP",
+        "PPPPP",
+        "PPPPP",
+        "PPPPP"
+      ]
+    },
+    {
+      "y": 1,
+      "rows": [
+        "LPPPL",
+        "P   P",
+        "P C P",
+        "P   P",
+        "L P L"
+      ]
+    },
+    {
+      "y": 2,
+      "rows": [
+        "LPGPL",
+        "P   P",
+        "G T G",
+        "P   P",
+        "LPGPL"
+      ]
+    },
+    {
+      "y": 3,
+      "rows": [
+        "PPPPP",
+        "PPPPP",
+        "PPPPP",
+        "PPPPP",
+        "PPPPP"
+      ]
+    }
+  ]
+}

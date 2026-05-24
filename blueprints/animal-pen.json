@@ -1,0 +1,61 @@
+{
+  "name": "animal-pen",
+  "description": "Enclos simple 9x3x9 pour animaux, avec barriere, porte et torches.",
+  "size": [9, 3, 9],
+  "origin": [0, 0, 0],
+  "materials": {
+    "oak_fence": 31,
+    "oak_fence_gate": 1,
+    "torch": 4
+  },
+  "legend": {
+    " ": "air",
+    "F": "oak_fence",
+    "G": "oak_fence_gate",
+    "T": "torch"
+  },
+  "layers": [
+    {
+      "y": 0,
+      "rows": [
+        "FFFFFFFFF",
+        "F       F",
+        "F       F",
+        "F       F",
+        "F       F",
+        "F       F",
+        "F       F",
+        "F       F",
+        "FFFFGFFFF"
+      ]
+    },
+    {
+      "y": 1,
+      "rows": [
+        "T       T",
+        "         ",
+        "         ",
+        "         ",
+        "         ",
+        "         ",
+        "         ",
+        "         ",
+        "T       T"
+      ]
+    },
+    {
+      "y": 2,
+      "rows": [
+        "         ",
+        "         ",
+        "         ",
+        "         ",
+        "         ",
+        "         ",
+        "         ",
+        "         ",
+        "         "
+      ]
+    }
+  ]
+}

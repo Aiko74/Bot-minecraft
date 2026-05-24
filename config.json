@@ -1,0 +1,38 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 62625,
+    "username": "BotAssistant",
+    "version": "1.20.1"
+  },
+  "owners": [
+    "Aiko74"
+  ],
+  "behavior": {
+    "foodEatAt": 14,
+    "foodCriticalAt": 8,
+    "foodCarry": 16,
+    "healthReturnAt": 8,
+    "oxygenCriticalAt": 10,
+    "hostileDistance": 9,
+    "hostileCriticalDistance": 5,
+    "mineSearchRadius": 64,
+    "exploreRadius": 24,
+    "farmRadius": 18,
+    "sugarCaneRadius": 24,
+    "maxCookItemsPerFarmRun": 8,
+    "minEmptySlots": 3,
+    "pathThinkTimeout": 10000,
+    "baseProtectionRadius": 48,
+    "farmProtectionRadius": 24,
+    "buildProtectionRadius": 24,
+    "mineStartDistanceFromBase": 64,
+    "buildGatherDistanceFromBase": 500,
+    "miningExploreStep": 18,
+    "miningMaxScanCycles": 20,
+    "miningStripLength": 48,
+    "diamondTargetY": -58,
+    "autoSleepAtBase": true,
+    "autoFarmAnimalsDays": 3
+  }
+}
