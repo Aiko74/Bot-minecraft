@@ -53,6 +53,14 @@ function wantsFarmCooking(message) {
   )
 }
 
+function parseDirection(message) {
+  if (message.includes('nord')) return 'nord'
+  if (message.includes('sud')) return 'sud'
+  if (message.includes('ouest')) return 'ouest'
+  if (message.includes('est')) return 'est'
+  return null
+}
+
 function parseBlueprintName(message) {
   if (message.includes('animal-pen') || message.includes('enclos')) {
     return 'animal-pen'
@@ -179,10 +187,13 @@ function parseIntent(rawMessage) {
 
   if (
     message === 'viens' ||
+    message === 'vien' ||
     message === 'viens ici' ||
+    message === 'vien ici' ||
     message === 'come' ||
     message === 'come here' ||
-    message === 'viens vers moi'
+    message === 'viens vers moi' ||
+    message === 'vien vers moi'
   ) {
     return { type: 'come' }
   }
@@ -258,7 +269,7 @@ function parseIntent(rawMessage) {
   }
 
   if (message === 'explore' || message === 'explorer' || message === 'exploration') {
-    return { type: 'explore' }
+    return { type: 'explore', radius: extractNumber(message) || null, direction: parseDirection(message) }
   }
 
   if (
@@ -317,6 +328,13 @@ function parseIntent(rawMessage) {
     message.includes('fais la ferme') ||
     message.includes('occupe toi de la ferme') ||
     message.includes('occupe toi des animaux') ||
+    message.includes('nourris animaux') ||
+    message.includes('nourris les animaux') ||
+    message.includes('nourri les animaux') ||
+    message.includes('reproduis animaux') ||
+    message.includes('reproduis les animaux') ||
+    message.includes('reproduction animaux') ||
+    message.includes('farm animaux') ||
     message.includes('gere la ferme') ||
     message.includes('recolte ferme') ||
     message.includes('recolte la canne') ||
@@ -388,8 +406,8 @@ function parseIntent(rawMessage) {
     return { type: 'mine', target, amount: extractNumber(message) || target.defaultAmount }
   }
 
-  if (message.includes('explore')) {
-    return { type: 'explore' }
+  if (message.includes('explore') || message.includes('explorer') || message.includes('exploration')) {
+    return { type: 'explore', radius: extractNumber(message) || null, direction: parseDirection(message), biome: message.includes('biome') }
   }
 
   return { type: 'unknown' }
@@ -399,6 +417,7 @@ module.exports = {
   extractNumber,
   normalizeMessage,
   parseBlueprintName,
+  parseDirection,
   parseFarmKind,
   parseIntent
 }

@@ -1,0 +1,14 @@
+{
+  "server": {
+    "host": "",
+    "port": 25565,
+    "username": "BotAssistant",
+    "auth": "offline",
+    "version": "1.20.1"
+  },
+  "owners": [],
+  "behavior": {
+    "autoSleepAtBase": false,
+    "autoFarmAnimalsDays": 3
+  }
+}

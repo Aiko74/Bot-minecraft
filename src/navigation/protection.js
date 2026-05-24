@@ -31,7 +31,7 @@ function createProtectedZones(state, config, farmKindLabel) {
     zones.push({
       label: `portail ${dimension}`,
       pos,
-      radius: config.portalProtectionRadius || 8
+      radius: config.portalProtectionRadius || 0
     })
   }
 

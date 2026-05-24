@@ -6,8 +6,9 @@ module.exports = {
     await ctx.helpers.runExclusive(async () => {
       ctx.state.setStopRequested(false)
       await ctx.helpers.safeGoBase({ force: true, ignoreStop: true })
-      const stored = await ctx.helpers.storeItems()
-      if (stored) ctx.say('Depot termine.')
+      const stored = await ctx.helpers.storeItems({ keepFood: false, keepLoadout: false })
+      if (stored) ctx.say('📦 Dépôt terminé.')
+      else ctx.say('⚠️ Dépôt incomplet : coffre de base plein ou inaccessible.')
     })
   }
 }

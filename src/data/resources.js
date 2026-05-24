@@ -24,7 +24,7 @@ const RESOURCE_TARGETS = [
       'oak_log', 'spruce_log', 'birch_log', 'jungle_log', 'acacia_log', 'dark_oak_log',
       'mangrove_log', 'cherry_log', 'crimson_stem', 'warped_stem'
     ],
-    defaultAmount: 16
+    defaultAmount: 64
   },
   {
     key: 'diamond',

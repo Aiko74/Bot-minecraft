@@ -2,6 +2,11 @@
 
 Toutes les commandes se tapent dans le chat Minecraft.
 
+Statut V1 test:
+
+- OK/Beta: commandes conseillees pour les tests amis.
+- Feature incoming: visible dans l'app, mais pas encore garantie pour la V1.
+
 ```text
 help                         -> affiche l'aide courte
 status                       -> etat du bot: mission, vie, faim, inventaire, base, farms
@@ -20,9 +25,9 @@ prepare                      -> prend nourriture, outils, torches, armure
 setfarm animaux              -> enregistre la ferme animaux et son coffre proche
 setfarm canne                -> enregistre la ferme canne et son coffre proche
 farms                        -> affiche les coordonnees des farms
-ferme animaux                -> nourrit, recolte le surplus, cuit, depose
-ferme canne                  -> recolte la canne mature et depose
-ferme                        -> fait animaux puis canne
+ferme animaux                -> Feature incoming
+ferme canne                  -> Feature incoming
+ferme                        -> Feature incoming
 
 mine 64 fer                  -> mine une ressource puis depose a la base
 mine 32 charbon              -> variantes: fer, charbon, diamant, or, lapis, redstone, pierre
@@ -38,19 +43,19 @@ mange                        -> mange si possible
 sleep                        -> dort dans un lit proche si possible
 defend on / defend off       -> active/desactive la defense automatique
 
-trouve coffre                -> indique le coffre/baril proche
-trouve lit                   -> indique le lit proche
-trouve village               -> cherche des signes de village proche
+trouve coffre                -> Feature incoming
+trouve lit                   -> Feature incoming
+trouve village               -> Feature incoming
 
-blueprints                   -> liste les modeles disponibles
-maison                       -> affiche les materiaux du blueprint maison
-scan maison                  -> cherche un terrain plat pour construire
-preparebuild maison          -> prepare les ressources du blueprint maison
-preparebuild enclos          -> prepare le blueprint animal-pen
-preparebuild ferme canne     -> prepare le blueprint sugar-cane-farm
-build maison                 -> verifie/prepare puis tente de construire la maison
-build enclos                 -> verifie/prepare puis tente de construire l'enclos
-build ferme canne            -> verifie/prepare puis tente de construire la ferme a canne
+blueprints                   -> Feature incoming
+maison                       -> Feature incoming
+scan maison                  -> Feature incoming
+preparebuild maison          -> Feature incoming
+preparebuild enclos          -> Feature incoming
+preparebuild ferme canne     -> Feature incoming
+build maison                 -> Feature incoming
+build enclos                 -> Feature incoming
+build ferme canne            -> Feature incoming
 ```
 
 Phrases naturelles comprises:

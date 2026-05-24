@@ -5,3 +5,6 @@ bot-memory.json
 server.log
 server.err.log
 *.log
+desktop/dist/
+data/desktop-settings.json
+release/

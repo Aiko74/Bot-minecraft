@@ -1,17 +1,17 @@
 const fs = require('fs')
 const path = require('path')
 
-const CONFIG_FILE = path.join(__dirname, '..', 'config.json')
+const CONFIG_FILE = process.env.AIKO_CONFIG_FILE || path.join(__dirname, '..', 'config.json')
 
 const DEFAULT_CONFIG = {
   server: {
-    host: 'blazeoff-egkj.aternos.me',
-    port: 30681,
+    host: '',
+    port: 25565,
     username: 'BotAssistant',
     auth: 'offline',
     version: '1.20.1'
   },
-  owners: ['Aiko74'],
+  owners: [],
   behavior: {
     foodEatAt: 14,
     foodCriticalAt: 8,
@@ -36,7 +36,7 @@ const DEFAULT_CONFIG = {
     miningMaxScanCycles: 20,
     miningStripLength: 48,
     diamondTargetY: -58,
-    autoSleepAtBase: true,
+    autoSleepAtBase: false,
     autoFarmAnimalsDays: 3
   }
 }

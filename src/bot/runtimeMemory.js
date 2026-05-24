@@ -9,7 +9,7 @@ function createRuntimeMemory(deps) {
     deps.setNetherPortals(memory.netherPortals || { overworld: null, nether: null })
     deps.setBuildSite(memory.buildSite)
     deps.setCurrentMission(memory.currentMission)
-    deps.setAutomationState(memory.automation || { lastAnimalFarmDay: null })
+    deps.setAutomationState(memory.automation || { lastAnimalFarmDay: null, nextAnimalFarmDay: null })
   }
 
   function saveMemory() {

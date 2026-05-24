@@ -6,6 +6,6 @@ module.exports = {
     const buildSite = ctx.helpers.floorVec(ctx.bot.entity.position)
     ctx.state.setBuildSite(buildSite)
     ctx.helpers.saveMemory()
-    ctx.say(`Zone de construction enregistree: ${buildSite.x} ${buildSite.y} ${buildSite.z}.`)
+    ctx.say('🏗️ Chantier ajouté.')
   }
 }

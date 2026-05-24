@@ -5,7 +5,7 @@ async function handleLegacyCommand(ctx, intent, username) {
     if (intent.type === 'return') {
       await h.returnBase({ stopMission: true })
     } else if (intent.type === 'hunt') {
-      await h.prepareMission({ missionType: 'hunt' })
+      await h.prepareMission({ missionType: 'hunt', quiet: true })
       if (ctx.state.getStopRequested()) return
       await h.hunt(intent.amount)
     } else if (intent.type === 'farm') {

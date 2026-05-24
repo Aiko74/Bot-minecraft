@@ -12,6 +12,7 @@ const {
 } = require('./blueprint-utils')
 const { loadConfig } = require('./src/memory/config')
 const { parseIntent } = require('./src/chat/intents')
+const { progressBar, progressBucket, progressPercent } = require('./src/chat/progress')
 const { createMissionText } = require('./src/bot/missionManager')
 const { createCommandContextFactory } = require('./src/bot/commandContext')
 const { createMissionRuntime } = require('./src/bot/missionRuntime')
@@ -72,6 +73,7 @@ const {
 
 const CONFIG = loadConfig()
 let botConnected = false
+let startupAnnounced = false
 
 const bot = mineflayer.createBot({
   host: CONFIG.host,
@@ -110,7 +112,7 @@ let farmNoDigActive = false
 let farmProtectionActive = false
 let followTargetUsername = null
 let lastBasePathFailureAt = 0
-let automationState = { lastAnimalFarmDay: null }
+let automationState = { lastAnimalFarmDay: null, nextAnimalFarmDay: null }
 let farmDoorIssues = []
 let lastFarmDepositOpened = false
 let lastFarmDepositedCount = 0
@@ -182,6 +184,8 @@ const doorHelpers = createDoorHelpers({
 
 const portalHelpers = createPortalHelpers({
   bot,
+  canBreakForPath,
+  digTowardPosition,
   getNetherPortals: () => netherPortals,
   goals,
   isStopRequested: () => stopRequested,
@@ -228,6 +232,7 @@ const chestHelpers = createChestHelpers({
   fuelValues: FUEL_VALUES,
   getBaseContainerPos: () => baseContainerPos,
   getBasePos: () => basePos,
+  getFarmContainerPos: () => farmContainerPos,
   getFarmNoDigActive: () => farmNoDigActive,
   getLastFarmDepositedCount: () => lastFarmDepositedCount,
   goals,
@@ -391,6 +396,7 @@ const automationHelpers = createAutomationHelpers({
   isMissionActive: () => missionActive,
   isNearBase,
   isStopRequested: () => stopRequested,
+  logError,
   logTag,
   runExclusive,
   safeChat,
@@ -558,6 +564,7 @@ async function safeGoto(goal, label = 'destination', options = {}) {
     const previousCanDig = defaultMove.canDig
     const previousCanOpenDoors = defaultMove.canOpenDoors
     const previousAllow1by1Towers = defaultMove.allow1by1towers
+    const previousSafeToBreak = defaultMove.safeToBreak
     const previousScaffoldingBlocks = Array.isArray(defaultMove.scafoldingBlocks)
       ? [...defaultMove.scafoldingBlocks]
       : null
@@ -567,6 +574,7 @@ async function safeGoto(goal, label = 'destination', options = {}) {
       if (options.canOpenDoors !== false) await doorHelpers.openNearbyDoors(5, { quiet: true })
 
       if (options.canDig === false || forceNoDig) defaultMove.canDig = false
+      else defaultMove.safeToBreak = options.safeToBreak || canBreakForPath
       if (options.canPlace === false || forceNoDig) {
         console.log('[farm][path] placement bloc interdit')
         defaultMove.allow1by1towers = false
@@ -585,6 +593,7 @@ async function safeGoto(goal, label = 'destination', options = {}) {
       defaultMove.canDig = previousCanDig
       defaultMove.canOpenDoors = previousCanOpenDoors
       defaultMove.allow1by1towers = previousAllow1by1Towers
+      defaultMove.safeToBreak = previousSafeToBreak
       if (previousScaffoldingBlocks) defaultMove.scafoldingBlocks = previousScaffoldingBlocks
       bot.pathfinder.setMovements(defaultMove)
       if (options.successCheck && !options.successCheck()) return false
@@ -593,6 +602,7 @@ async function safeGoto(goal, label = 'destination', options = {}) {
       defaultMove.canDig = previousCanDig
       defaultMove.canOpenDoors = previousCanOpenDoors
       defaultMove.allow1by1towers = previousAllow1by1Towers
+      defaultMove.safeToBreak = previousSafeToBreak
       if (previousScaffoldingBlocks) defaultMove.scafoldingBlocks = previousScaffoldingBlocks
       bot.pathfinder.setMovements(defaultMove)
 
@@ -763,6 +773,7 @@ async function travelToPosition(pos, label = 'destination', options = {}) {
         attempts: 1,
         timeoutMs: options.timeoutMs || 8000,
         canDig,
+        safeToBreak: options.safeToBreak,
         quiet,
         successCheck: () => bot.entity.position.distanceTo(pos) <= finalRange || bot.entity.position.distanceTo(pos) <= before - 4
       })
@@ -1341,18 +1352,19 @@ async function returnBase(options = {}) {
   bot.pathfinder.setGoal(null)
   bot.clearControlStates()
 
-  safeChat('Retour base force.')
+  safeChat('🏠 Retour à la base.')
   const arrived = await safeGoBase({ force: true, ignoreStop: true })
   let stored = true
   if (arrived && deposit) stored = await chestHelpers.storeItems()
-  if (arrived && stored) safeChat('Base atteinte, items ranges.')
-  if (arrived && !stored) safeChat('Base atteinte, mais depot incomplet.')
+  if (arrived && stored) safeChat('🏠 Base atteinte.')
+  if (arrived && !stored) safeChat('🏠 Base atteinte. Dépôt incomplet.')
   return arrived
 }
 
 async function prepareMission(options = {}) {
   const visitBase = options.visitBase === true
   const missionType = options.missionType || null
+  const quiet = options.quiet === true
   let needsBase = visitBase
 
   if (!needsBase && basePos) {
@@ -1362,7 +1374,7 @@ async function prepareMission(options = {}) {
     if (missionType === 'hunt' && !toolHelpers.hasUsableWeapon()) needsBase = true
   }
 
-  safeChat(needsBase ? 'Preparation mission a la base.' : 'Preparation locale.')
+  if (!quiet) safeChat(needsBase ? 'Préparation mission à la base.' : 'Préparation locale.')
 
   if (needsBase && basePos) {
     const reached = await safeGoBase()
@@ -1414,7 +1426,7 @@ async function prepareMission(options = {}) {
     safeChat("Attention: je n'ai pas d'arme. Je peux chasser, mais ce sera moins fiable.", 8000)
   }
 
-  safeChat('Pret.')
+  if (!quiet) safeChat('✅ Prêt.')
   return true
 }
 
@@ -1423,6 +1435,81 @@ function countItems(names) {
   return bot.inventory.items()
     .filter(item => accepted.has(item.name))
     .reduce((total, item) => total + item.count, 0)
+}
+
+function chatResourceLabel(target) {
+  const labels = {
+    ancient_debris: 'Ancient debris',
+    coal: 'Charbon',
+    cobblestone: 'Pierre',
+    diamond: 'Diamant',
+    gold: 'Or',
+    iron: 'Fer',
+    lapis: 'Lapis',
+    nether_gold: 'Or du Nether',
+    quartz: 'Quartz',
+    redstone: 'Redstone',
+    wood: 'Bois'
+  }
+  return labels[target.key] || target.label || target.key
+}
+
+function isCollectionTarget(target) {
+  return target && (target.key === 'wood' || target.key === 'cobblestone')
+}
+
+function resourceProgressIcon(target) {
+  if (target.key === 'wood') return '🪓'
+  if (target.key === 'cobblestone') return '🪨'
+  return '⛏️'
+}
+
+function reportResourceProgress(mission, target, options = {}) {
+  if (!mission || !target) return
+  const amount = Math.max(1, mission.amount || 1)
+  const progress = Math.min(mission.progress || 0, amount)
+  const bucket = progressBucket(progress, amount)
+  if (!options.force && bucket <= (mission.chatProgressBucket ?? -1) && progress < amount) return
+
+  mission.chatProgressBucket = bucket
+  safeChat(`${resourceProgressIcon(target)} ${chatResourceLabel(target)} : ${progress}/${amount} ${progressBar(progress, amount)} ${progressPercent(progress, amount)}%`)
+}
+
+function announceResourceMissionStart(target, amount) {
+  const label = chatResourceLabel(target)
+  if (isCollectionTarget(target)) {
+    safeChat('🌲 Collecte lancée.')
+    safeChat(`🎯 Matériau cible : ${label} x${amount}.`)
+    return
+  }
+
+  safeChat(`⛏️ Mission minage acceptée : ${label} x${amount}.`)
+  safeChat('Départ vers la zone de minage...')
+}
+
+function announceResourceMissionComplete(mission, target) {
+  const label = chatResourceLabel(target)
+  const amount = Math.max(0, mission.amount || 0)
+  const progress = Math.min(mission.progress || 0, amount)
+  if (isCollectionTarget(target)) {
+    safeChat('✅ Collecte terminée.')
+    safeChat(`📦 ${label} récolté : ${progress}/${amount}.`)
+  } else {
+    safeChat('✅ Minage terminé.')
+    safeChat(`📦 ${label} récupéré : ${progress}/${amount}.`)
+  }
+  safeChat('🏠 Retour à la base.')
+}
+
+function reportHuntProgress(mission, options = {}) {
+  if (!mission) return
+  const amount = Math.max(1, mission.amount || 1)
+  const progress = Math.min(mission.progress || 0, amount)
+  const bucket = progressBucket(progress, amount)
+  if (!options.force && bucket <= (mission.chatProgressBucket ?? -1) && progress < amount) return
+
+  mission.chatProgressBucket = bucket
+  safeChat(`🏹 Chasse : ${progress}/${amount} ${progressBar(progress, amount)} ${progressPercent(progress, amount)}%`)
 }
 
 function protectedZones() {
@@ -1451,14 +1538,14 @@ async function moveAwayFromBaseForMining() {
   const safeDistance = Math.max(CONFIG.baseProtectionRadius + 8, Math.min(targetDistance, 72))
   if (distance >= targetDistance) return true
 
-  safeChat(`Je m'eloigne de la base avant de miner (${Math.round(distance)}/${targetDistance} blocs).`, 8000)
+  logTag('mine', `depart zone minage distance=${Math.round(distance)}/${targetDistance}`)
 
   // Priorite: si la base a une porte, le bot doit essayer de la passer seul
   // avant de chercher un point lointain au hasard.
   await doorHelpers.forceExitThroughNearestDoor()
   distance = bot.entity.position.distanceTo(basePos)
   if (distance >= CONFIG.baseProtectionRadius + 2) {
-    safeChat(`Je suis sorti de la base (${Math.round(distance)} blocs).`, 8000)
+    logTag('mine', `hors base distance=${Math.round(distance)}`)
     return true
   }
 
@@ -1483,7 +1570,7 @@ async function moveAwayFromBaseForMining() {
   for (let step = 0; step < 4 && !stopRequested; step++) {
     distance = bot.entity.position.distanceTo(basePos)
     if (distance >= safeDistance) {
-      safeChat(`Distance base OK pour miner: ${Math.round(distance)} blocs.`, 10000)
+      logTag('mine', `distance base ok=${Math.round(distance)}`)
       return true
     }
 
@@ -1546,14 +1633,14 @@ async function moveAwayFromBaseForMining() {
 
   distance = bot.entity.position.distanceTo(basePos)
   if (distance >= CONFIG.baseProtectionRadius + 2) {
-    safeChat(`Je suis hors zone protegee (${Math.round(distance)} blocs). Je mine uniquement les blocs non proteges.`, 10000)
+    logTag('mine', `hors zone protegee distance=${Math.round(distance)}`)
     return true
   }
 
   // Avant, le bot mettait la mission en pause ici et demandait au joueur de l'accompagner.
   // Maintenant il continue quand meme: la protection de base empeche deja de casser les blocs
   // proches de la base, et le bot explorera pour trouver la ressource plus loin.
-  safeChat(`Je n'ai pas atteint la distance ideale (${Math.round(bestDistance)} blocs), mais je continue seul en evitant la zone protegee.`, 10000)
+  logTag('mine', `distance ideale non atteinte, continuation prudente best=${Math.round(bestDistance)}`)
   return true
 }
 
@@ -1633,6 +1720,20 @@ function isStableFloor(block) {
   return block.boundingBox === 'block'
 }
 
+function canBreakForPath(block) {
+  if (!block || !block.name) return false
+  if (!block.diggable) return false
+  if (block.name === 'nether_portal' || block.name === 'obsidian' || block.name === 'crying_obsidian') return false
+  if (block.name === 'bedrock' || block.name === 'end_portal_frame' || block.name === 'end_portal') return false
+  if (dangerHelpers.blockIsHazard(block)) return false
+  if (protectedZoneReason(block.position)) return false
+
+  const above = bot.blockAt(block.position.offset(0, 1, 0))
+  if (above && ['lava', 'water'].includes(above.name)) return false
+
+  return true
+}
+
 function miningDirectionVector() {
   const current = bot.entity.position
   let dx = 0
@@ -1708,6 +1809,7 @@ async function digBlockSafely(block, label = 'bloc') {
   }
 
   if (!block || isAirLike(block)) return true
+  if (!canBreakForPath(block)) return false
   if (!block.diggable) return false
   if (dangerHelpers.blockIsHazard(block)) return false
 
@@ -1724,7 +1826,7 @@ async function digBlockSafely(block, label = 'bloc') {
     const reached = await safeGoto(
       new goals.GoalLookAtBlock(block.position, bot.world, { reach: 4.5 }),
       label,
-      { attempts: 1, timeoutMs: 6000, quiet: true }
+      { attempts: 1, timeoutMs: 6000, canDig: true, safeToBreak: canBreakForPath, quiet: true }
     )
     if (!reached || !bot.canDigBlock(block)) return false
   }
@@ -1805,6 +1907,92 @@ async function digStairStepDown(direction) {
   if (!await digBlockSafely(feet, 'descente mine')) return false
 
   return moveIntoMinedStep(feetPos, 'descente mine')
+}
+
+async function digStairStepUp(direction, label = 'montee mine') {
+  const origin = floorVec(bot.entity.position)
+  const floorPos = origin.offset(direction.x, 0, direction.z)
+  const feetPos = origin.offset(direction.x, 1, direction.z)
+  const headPos = origin.offset(direction.x, 2, direction.z)
+  const floor = bot.blockAt(floorPos)
+
+  if (!isStableFloor(floor)) {
+    logTag('danger', `${label}: marche instable ${floorPos}`)
+    return false
+  }
+
+  const feet = bot.blockAt(feetPos)
+  const head = bot.blockAt(headPos)
+
+  if (!await digBlockSafely(head, label)) return false
+  if (!await digBlockSafely(feet, label)) return false
+
+  return moveIntoMinedStep(feetPos, label)
+}
+
+function directionToward(pos) {
+  const current = bot.entity.position
+  const dx = pos.x - current.x
+  const dz = pos.z - current.z
+
+  if (Math.abs(dx) > Math.abs(dz)) {
+    return { x: dx > 0 ? 1 : -1, z: 0 }
+  }
+
+  if (Math.abs(dz) > 0.2) return { x: 0, z: dz > 0 ? 1 : -1 }
+  return miningDirectionVector()
+}
+
+async function digTowardPosition(pos, label = 'tunnel', options = {}) {
+  if (!isValidPos(pos)) return false
+
+  const range = options.range || 3
+  const maxSteps = options.maxSteps || 64
+  const quiet = options.quiet === true
+  let failedSteps = 0
+
+  for (let step = 0; step < maxSteps && !stopRequested; step++) {
+    const distance = bot.entity.position.distanceTo(pos)
+    if (distance <= range) return true
+
+    if (step % 4 === 0) {
+      const reached = await safeGoto(new goals.GoalNear(pos.x, pos.y, pos.z, range), label, {
+        attempts: 1,
+        timeoutMs: 3500,
+        canDig: true,
+        canPlace: false,
+        safeToBreak: canBreakForPath,
+        quiet,
+        successCheck: () => bot.entity.position.distanceTo(pos) <= range
+      })
+      if (reached) return true
+    }
+
+    const currentY = Math.floor(bot.entity.position.y)
+    const targetY = Math.floor(pos.y)
+    const primary = directionToward(pos)
+    const directions = alternateDirections(primary)
+    let moved = false
+
+    for (const direction of directions) {
+      if (targetY > currentY + 1) moved = await digStairStepUp(direction, label)
+      else if (targetY < currentY - 1) moved = await digStairStepDown(direction)
+      else moved = await digForwardTunnelStep(direction, label)
+
+      if (moved) break
+    }
+
+    if (!moved) {
+      failedSteps++
+      if (!quiet) logTag('path', `${label} creusage bloque ${failedSteps}/${maxSteps} distance=${Math.round(distance)}`)
+      if (failedSteps >= 6) return false
+      await sleep(250)
+    } else {
+      failedSteps = 0
+    }
+  }
+
+  return bot.entity.position.distanceTo(pos) <= range
 }
 
 async function relocateMiningStart(strategy) {
@@ -2238,12 +2426,12 @@ async function mine(target, amount, options = {}) {
   let minedTunnelCycles = 0
   const strategy = miningStrategyFor(target, CONFIG)
 
+  announceResourceMissionStart(target, mission.amount)
+
   if (isDiamondTarget(target)) {
     logTag('mine', `diamond quiet mode objective=0/${mission.amount}`)
   } else if (isAncientDebrisTarget(target)) {
     logTag('mine', `ancient_debris quiet mode objective=0/${mission.amount}`)
-  } else {
-    safeChat(`Mission minage: ${mission.amount} ${target.label}.`)
   }
   logTag('mine', `start target=${target.key} amount=${mission.amount} mode=${strategy.mode}`)
 
@@ -2291,7 +2479,7 @@ async function mine(target, amount, options = {}) {
         const progressText = isStripMiningTarget(target)
           ? `tunnels ${minedTunnelCycles}, objectif ${mission.progress}/${mission.amount}`
           : `scan ${searchFails}/${strategy.maxScanCycles}`
-        safeChat(`Je cherche encore ${target.label}: ${progressText}.`, 10000)
+        logTag('scan', `recherche ${target.key}: ${progressText}`)
       }
       if (searchFails >= strategy.maxScanCycles) {
         missionRuntime.pauseMission(`Je ne trouve pas ${target.label} apres une recherche progressive. Cause probable: chunks non charges, zone trop dangereuse ou ressource trop rare.`)
@@ -2311,9 +2499,21 @@ async function mine(target, amount, options = {}) {
       const reached = await safeGoto(
         new goals.GoalLookAtBlock(block.position, bot.world, { reach: 4.5 }),
         `${target.label}`,
-        { attempts: 2 }
+        { attempts: 2, canDig: true, safeToBreak: canBreakForPath }
       )
       if (!reached) {
+        const tunneled = await digTowardPosition(block.position, `tunnel ${target.label}`, {
+          range: 4,
+          maxSteps: target.dimension === 'nether' ? 56 : 36,
+          quiet: true
+        })
+        if (!tunneled) {
+          searchFails++
+          continue
+        }
+      }
+
+      if (bot.entity.position.distanceTo(block.position) > 5) {
         searchFails++
         continue
       }
@@ -2359,10 +2559,18 @@ async function mine(target, amount, options = {}) {
       const gained = Math.max(after - before, 0)
       if (gained > 0) {
         missionRuntime.addMissionProgress(gained)
-        const label = isDiamondTarget(target) ? 'diamant' : target.label
-        safeChat(`${label} ${Math.min(mission.progress, mission.amount)}/${mission.amount}`)
+        reportResourceProgress(mission, target)
       } else {
-        if (!isDiamondTarget(target)) safeChat(`Bloc mine, drop non confirme pour ${target.label}.`, 8000)
+        await sleep(500)
+        await collectNearbyDrops(8)
+        const retryAfter = countItems(target.drops)
+        const retryGained = Math.max(retryAfter - before, 0)
+        if (retryGained > 0) {
+          missionRuntime.addMissionProgress(retryGained)
+          reportResourceProgress(mission, target)
+        } else {
+          logTag('mine', `drop non confirme target=${target.key}`)
+        }
       }
     } catch (err) {
       logError('mine error', err)
@@ -2371,7 +2579,9 @@ async function mine(target, amount, options = {}) {
   }
 
   if (currentMission === mission && !stopRequested && mission.progress >= mission.amount) {
-    await missionRuntime.finalizeMissionWithBaseDeposit(mission, 'Objectif minage atteint.')
+    reportResourceProgress(mission, target, { force: true })
+    announceResourceMissionComplete(mission, target)
+    await missionRuntime.finalizeMissionWithBaseDeposit(mission, isCollectionTarget(target) ? 'Collecte terminee.' : 'Minage termine.')
   }
 }
 
@@ -2394,7 +2604,8 @@ async function hunt(amount, options = {}) {
   missionRuntime.setMissionStatus('running')
   let searchFails = 0
 
-  safeChat(`Mission chasse: ${mission.amount} animaux.`)
+  safeChat('🏹 Chasse en cours.')
+  safeChat(`🎯 Objectif : ${mission.amount} animaux.`)
 
   while (currentMission === mission && missionActive && !stopRequested && mission.progress < mission.amount) {
     const safe = await dangerHelpers.ensureSurvival({ allowReturn: true })
@@ -2461,7 +2672,7 @@ async function hunt(amount, options = {}) {
       await collectNearbyDrops(8)
       if (!animal.isValid || !bot.entities[animal.id]) {
         missionRuntime.addMissionProgress(1)
-        safeChat(`${Math.min(mission.progress, mission.amount)}/${mission.amount} animaux chasses.`)
+        reportHuntProgress(mission)
       } else {
         safeChat(`Je n'ai pas reussi a tuer ${animal.name}, je cherche une autre cible.`, 8000)
       }
@@ -2472,6 +2683,9 @@ async function hunt(amount, options = {}) {
   }
 
   if (currentMission === mission && !stopRequested && mission.progress >= mission.amount) {
+    reportHuntProgress(mission, { force: true })
+    safeChat('✅ Chasse terminée.')
+    safeChat('🏠 Retour à la base.')
     await missionRuntime.finalizeMissionWithBaseDeposit(mission, 'Chasse terminee.')
   }
 }
@@ -2491,8 +2705,7 @@ function setFarm(kind) {
     farmZones.animals = floorVec(bot.entity.position)
     if (container) farmContainerPos.animals = container.position.clone()
     if (door) farmDoorPos.animals = door.position.clone()
-    const day = automationHelpers.minecraftDay()
-    automationState.lastAnimalFarmDay = day === null ? automationState.lastAnimalFarmDay : day
+    automationHelpers.startAnimalFarmTimer()
     console.log(`[farm] position ferme enregistrée ${farmZones.animals.x} ${farmZones.animals.y} ${farmZones.animals.z}`)
     if (container) console.log(`[farm] coffre ferme utilisé ${container.position.x} ${container.position.y} ${container.position.z}`)
     if (door) console.log(`[farm][door] entrée candidate ${door.position.x} ${door.position.y} ${door.position.z}`)
@@ -2506,12 +2719,8 @@ function setFarm(kind) {
 
   runtimeMemory.saveMemory()
 
-  if (container) {
-    const doorText = door ? ' et entree proche' : ''
-    safeChat(`Ferme ${farmKindLabel(normalizedKind)} enregistree avec coffre proche${doorText}.`)
-  } else {
-    safeChat(`Ferme ${farmKindLabel(normalizedKind)} enregistree. Aucun coffre de ferme proche.`)
-  }
+  if (normalizedKind === 'all') safeChat('🌾 Fermes ajoutées.')
+  else safeChat('🌾 Ferme ajoutée.')
 }
 
 function setFarmEntry(kind, username) {
@@ -3682,8 +3891,7 @@ async function farmAnimals(options = {}) {
   }
 
   if (currentMission === mission && !stopRequested) {
-    const day = automationHelpers.minecraftDay()
-    if (day !== null) automationState.lastAnimalFarmDay = day
+    if (!options.auto) automationHelpers.markAnimalFarmDone()
     missionRuntime.addMissionProgress(1)
     console.log('[farm][finish] mission terminée proprement')
     missionRuntime.finishMission()
@@ -3902,6 +4110,8 @@ process.on('unhandledRejection', err => {
 
 bot.on('spawn', () => {
   botConnected = true
+  console.log(`[connection] bot connecte`)
+  console.log(`[guide] Aiko est en ligne. Consulte l'application > Commandes pour voir les actions disponibles.`)
   mcData = minecraftData(bot.version)
   runtimeMemory.loadMemory()
   installFarmBlockProtectionGuard()
@@ -3912,7 +4122,13 @@ bot.on('spawn', () => {
     bot.tool.chestLocations.push(baseContainerPos)
   }
 
-  safeChat("Bot autonome actif. Commandes: setbase, setfarm animaux, setfarm canne, ferme, mission, reprendre, mine 20 diamant.")
+  if (!startupAnnounced) {
+    startupAnnounced = true
+    safeChat('Bonjour, je suis Aiko, ton assistant survival.')
+    safeChat("Je n'ecoute que les owners configures.")
+    safeChat("Essaie: status, setbase, prepare, mine 16 fer, retour base.")
+    safeChat("La liste complete est dans l'app: Commandes. Feature incoming = en developpement.")
+  }
   if (currentMission) {
     safeChat(`Mission en pause chargee. Dis reprendre. ${missionRuntime.missionProgressText()}`)
   }

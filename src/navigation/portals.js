@@ -41,6 +41,12 @@ function createPortalHelpers(deps) {
     return isNetherPortalBlock(block) ? block : null
   }
 
+  function savedPortalPosition(dimension = currentDimension()) {
+    const portals = deps.getNetherPortals()
+    const pos = portals && portals[dimension]
+    return deps.isValidPos(pos) ? pos : null
+  }
+
   function rememberPortal(dimension, blockOrPos) {
     const pos = blockOrPos && blockOrPos.position ? blockOrPos.position : blockOrPos
     if (!deps.isValidPos(pos)) return
@@ -89,18 +95,28 @@ function createPortalHelpers(deps) {
   }
 
   async function moveIntoPortal(portalBlock, label) {
-    const reached = await deps.safeGoto(
+    let reached = await deps.safeGoto(
       new deps.goals.GoalNear(portalBlock.position.x, portalBlock.position.y, portalBlock.position.z, 1),
       label,
       {
-        attempts: 2,
-        timeoutMs: 9000,
-        canDig: false,
+        attempts: 3,
+        timeoutMs: 12000,
+        canDig: true,
         canPlace: false,
+        safeToBreak: deps.canBreakForPath,
         quiet: true,
         successCheck: () => portalBlock.position.distanceTo(deps.bot.entity.position) <= 1.8
       }
     )
+
+    if (!reached && portalBlock.position.distanceTo(deps.bot.entity.position) > 3 && deps.digTowardPosition) {
+      console.log('[portal] chemin portail bloque, creusage prudent')
+      reached = await deps.digTowardPosition(portalBlock.position, 'tunnel portail nether', {
+        range: 2,
+        maxSteps: 72,
+        quiet: true
+      })
+    }
 
     if (!reached && portalBlock.position.distanceTo(deps.bot.entity.position) > 3) return false
 
@@ -119,9 +135,32 @@ function createPortalHelpers(deps) {
 
   async function enterNearestPortal(targetDimension, options = {}) {
     const fromDimension = currentDimension()
+    const savedPos = savedPortalPosition(fromDimension)
     let portal = savedPortalForDimension(fromDimension)
 
     if (!portal) portal = findNearestNetherPortal(options.searchRadius || 56)
+    if (!portal && savedPos) {
+      deps.safeChat('Je retourne vers le portail Nether memorise.', 9000)
+      await deps.travelToPosition(savedPos, 'portail nether memorise', {
+        finalRange: 8,
+        stepDistance: 12,
+        maxSteps: 48,
+        timeoutMs: 9000,
+        canDig: true,
+        safeToBreak: deps.canBreakForPath,
+        quiet: true
+      })
+
+      if (deps.bot.entity.position.distanceTo(savedPos) > 10 && deps.digTowardPosition) {
+        await deps.digTowardPosition(savedPos, 'tunnel portail nether memorise', {
+          range: 8,
+          maxSteps: 96,
+          quiet: true
+        })
+      }
+
+      portal = savedPortalForDimension(fromDimension) || findNearestNetherPortal(32)
+    }
 
     if (!portal) {
       deps.safeChat("Je ne vois pas de portail Nether charge proche de moi.", 9000)
@@ -184,7 +223,8 @@ function createPortalHelpers(deps) {
       stepDistance: 10,
       maxSteps: 8,
       timeoutMs: 7000,
-      canDig: false,
+      canDig: true,
+      safeToBreak: deps.canBreakForPath,
       quiet: true
     })
 
@@ -200,7 +240,8 @@ function createPortalHelpers(deps) {
     isOverworld,
     moveAwayFromCurrentPortal,
     rememberPortal,
-    savedPortalForDimension
+    savedPortalForDimension,
+    savedPortalPosition
   }
 }
 

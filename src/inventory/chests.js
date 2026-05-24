@@ -11,13 +11,17 @@ function createChestHelpers(deps) {
     'chicken',
     'rabbit'
   ])
+  const PATH_BLOCK_NAMES = new Set(['cobblestone', 'stone', 'dirt', 'netherrack'])
 
   function desiredWithdrawCount(item) {
     if (deps.food.isFood(item)) {
       const desiredCarry = MEAT_FOOD_NAMES.has(item.name)
-        ? Math.max(deps.config.foodCarry, 24)
+        ? Math.max(deps.config.foodCarry, 64)
         : deps.config.foodCarry
-      return Math.min(item.count, Math.max(0, desiredCarry - deps.food.foodCount()))
+      const currentFood = MEAT_FOOD_NAMES.has(item.name)
+        ? meatFoodCount()
+        : deps.food.foodCount()
+      return Math.min(item.count, Math.max(0, desiredCarry - currentFood))
     }
 
     if (deps.shouldWithdrawUpgrade(item, 'pickaxe')) return 1
@@ -48,8 +52,27 @@ function createChestHelpers(deps) {
     )
   }
 
+  function meatFoodCount() {
+    return deps.bot.inventory.items()
+      .filter(item => MEAT_FOOD_NAMES.has(item.name))
+      .reduce((total, item) => total + item.count, 0)
+  }
+
   function sameBlockPos(a, b) {
     return Boolean(a && b && a.x === b.x && a.y === b.y && a.z === b.z)
+  }
+
+  function farmContainerPositions() {
+    const saved = deps.getFarmContainerPos ? deps.getFarmContainerPos() : null
+    if (!saved) return []
+    return Object.values(saved).filter(Boolean)
+  }
+
+  function isSavedFarmContainer(pos) {
+    const baseContainerPos = deps.getBaseContainerPos()
+    return farmContainerPositions().some(farmPos =>
+      sameBlockPos(pos, farmPos) && !sameBlockPos(pos, baseContainerPos)
+    )
   }
 
   function uniqueBlocks(blocks) {
@@ -81,6 +104,7 @@ function createChestHelpers(deps) {
       point,
       matching: block => {
         if (!isContainerBlock(block)) return false
+        if (options.excludeFarm && isSavedFarmContainer(block.position)) return false
         if (!options.excludeBase || !baseContainerPos) return true
         return !sameBlockPos(block.position, baseContainerPos)
       },
@@ -121,6 +145,7 @@ function createChestHelpers(deps) {
 
     const blocks = findNearbyContainers(maxDistance, deps.bot.entity.position, {
       includeSavedBase: true,
+      excludeFarm: true,
       count: 24
     })
 
@@ -129,8 +154,18 @@ function createChestHelpers(deps) {
       return []
     }
 
-    deps.setBaseContainerPos(blocks[0].position.clone())
-    deps.saveMemory()
+    const baseContainerPos = deps.getBaseContainerPos()
+    blocks.sort((a, b) => {
+      const aSaved = baseContainerPos && sameBlockPos(a.position, baseContainerPos) ? 0 : 1
+      const bSaved = baseContainerPos && sameBlockPos(b.position, baseContainerPos) ? 0 : 1
+      if (aSaved !== bSaved) return aSaved - bSaved
+      return a.position.distanceTo(deps.bot.entity.position) - b.position.distanceTo(deps.bot.entity.position)
+    })
+
+    if (!baseContainerPos) {
+      deps.setBaseContainerPos(blocks[0].position.clone())
+      deps.saveMemory()
+    }
     return blocks
   }
 
@@ -138,8 +173,10 @@ function createChestHelpers(deps) {
     const accepted = names ? new Set(names) : null
     const keepFood = options.keepFood !== false
     const keepLoadout = options.keepLoadout !== false
+    const keepPathBlocks = options.keepPathBlocks === true
     const plan = new Map()
     let keptFood = 0
+    let keptPathBlocks = 0
 
     for (const item of deps.bot.inventory.items()) {
       if (accepted && !accepted.has(item.name)) continue
@@ -153,6 +190,11 @@ function createChestHelpers(deps) {
         countToDeposit = item.count - keptFromStack
       } else if (!accepted && keepLoadout && deps.food.isLoadoutItem(item)) {
         countToDeposit = 0
+      } else if (!accepted && keepPathBlocks && PATH_BLOCK_NAMES.has(item.name)) {
+        const keep = Math.max(0, 32 - keptPathBlocks)
+        const keptFromStack = Math.min(item.count, keep)
+        keptPathBlocks += keptFromStack
+        countToDeposit = item.count - keptFromStack
       }
 
       if (countToDeposit <= 0) continue
@@ -389,7 +431,8 @@ function createChestHelpers(deps) {
 
       const plan = buildDepositPlan(null, {
         keepFood: options.keepFood !== false,
-        keepLoadout: options.keepLoadout !== false
+        keepLoadout: options.keepLoadout !== false,
+        keepPathBlocks: options.keepPathBlocks === true
       })
 
       return depositPlanToContainers(plan, blocks, 'Base')

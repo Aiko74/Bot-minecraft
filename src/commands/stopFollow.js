@@ -3,6 +3,6 @@ module.exports = {
   aliases: ['stop follow', 'stopfollow', 'arrete de me suivre', 'ne me suis plus', 'stop suivi'],
   intentTypes: ['stopFollow'],
   run: async ctx => {
-    ctx.helpers.stopFollowPlayer('Suivi arrete.')
+    ctx.helpers.stopFollowPlayer('🟡 Suivi terminé, retour aux occupations.')
   }
 }

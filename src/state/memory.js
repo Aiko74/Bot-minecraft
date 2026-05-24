@@ -3,7 +3,7 @@ const path = require('path')
 const { Vec3 } = require('vec3')
 const { resourceTargetByKey } = require('../data/resources')
 
-const MEMORY_FILE = path.join(__dirname, '..', '..', 'bot-memory.json')
+const MEMORY_FILE = process.env.AIKO_MEMORY_FILE || path.join(__dirname, '..', '..', 'bot-memory.json')
 
 function vecToJSON(pos) {
   if (!pos) return null
@@ -97,7 +97,10 @@ function loadMemory() {
           ? memory.lastAnimalFarmDay
           : (memory.automation && typeof memory.automation.lastAnimalFarmDay === 'number'
               ? memory.automation.lastAnimalFarmDay
-              : null)
+              : null),
+        nextAnimalFarmDay: memory.automation && typeof memory.automation.nextAnimalFarmDay === 'number'
+          ? memory.automation.nextAnimalFarmDay
+          : null
       }
     }
   } catch {
@@ -110,7 +113,7 @@ function loadMemory() {
       netherPortals: { overworld: null, nether: null },
       buildSite: null,
       currentMission: null,
-      automation: { lastAnimalFarmDay: null }
+      automation: { lastAnimalFarmDay: null, nextAnimalFarmDay: null }
     }
   }
 }
@@ -128,7 +131,7 @@ function saveMemory(state, logError = () => {}) {
         netherPortals: savePortalMap(state.netherPortals),
         buildSite: vecToJSON(state.buildSite),
         mission: serializeMission(state.currentMission),
-        automation: state.automation || { lastAnimalFarmDay: null }
+        automation: state.automation || { lastAnimalFarmDay: null, nextAnimalFarmDay: null }
       }, null, 2)
     )
   } catch (err) {

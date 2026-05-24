@@ -11,8 +11,8 @@ module.exports = {
         keepLoadout: false,
         unequip: true
       })
-      if (stored) ctx.say('Depot force termine: inventaire et equipement ranges.')
-      else ctx.say('Depot force incomplet: coffre plein ou inaccessible.')
+      if (stored) ctx.say('📦 Dépôt forcé terminé : inventaire et équipement rangés.')
+      else ctx.say('⚠️ Dépôt forcé incomplet : coffre de base plein ou inaccessible.')
     })
   }
 }

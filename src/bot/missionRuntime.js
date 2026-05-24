@@ -132,7 +132,7 @@ function createMissionRuntime(deps) {
       return true
     }
 
-    const deposited = await depositForMission(`${reason} Retour base et depot.`)
+    const deposited = await depositForMission(reason || 'Retour base et depot.')
     if (deposited && deps.getCurrentMission() === mission && !deps.isStopRequested()) {
       finishMission()
       return true

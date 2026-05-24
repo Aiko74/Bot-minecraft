@@ -4,6 +4,6 @@ module.exports = {
   intentTypes: ['coords'],
   run: async ctx => {
     const pos = ctx.bot.entity.position
-    ctx.say(`Coords: ${Math.floor(pos.x)} ${Math.floor(pos.y)} ${Math.floor(pos.z)}.`)
+    ctx.say(`📍 Position actuelle : X: ${Math.floor(pos.x)} | Y: ${Math.floor(pos.y)} | Z: ${Math.floor(pos.z)}`)
   }
 }

@@ -65,7 +65,7 @@ function createFollowHelpers(deps) {
     }, 1200)
 
     deps.bot.pathfinder.setGoal(new deps.goals.GoalFollow(player, 2), true)
-    deps.safeChat(`Je suis ${username}.`)
+    deps.safeChat('🚶 Je te suis...')
   }
 
   return {

@@ -3,8 +3,13 @@ module.exports = {
   aliases: ['inventaire', 'inventory', 'montre ton inventaire'],
   intentTypes: ['inventory'],
   run: async ctx => {
-    const usedSlots = 36 - ctx.bot.inventory.emptySlotCount()
-    ctx.say(`Inventaire ${usedSlots}/36: ${countSummaryFromInventory(ctx, 14)}`)
+    const counts = ctx.helpers.countInventoryByName()
+    if (Object.keys(counts).length === 0) {
+      ctx.say('📦 Aucun objet détecté dans mon inventaire.')
+      return
+    }
+
+    ctx.say(`🎒 Inventaire du bot : ${countSummaryFromInventory(ctx, 14)}`)
   }
 }
 
