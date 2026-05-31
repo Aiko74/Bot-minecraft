@@ -1,9 +1,52 @@
 const fs = require('fs')
 const path = require('path')
 const { Vec3 } = require('vec3')
+const { loadConfig } = require('../config')
 const { resourceTargetByKey } = require('../data/resources')
 
 const MEMORY_FILE = process.env.AIKO_MEMORY_FILE || path.join(__dirname, '..', '..', 'bot-memory.json')
+const V2_STABLE_MISSION_TYPES = new Set(['mine', 'collect', 'hunt'])
+
+function emptyMemory(extra = {}) {
+  return {
+    basePos: null,
+    baseContainerPos: null,
+    farmZones: { animals: null, sugarcane: null },
+    farmContainerPos: { animals: null, sugarcane: null },
+    farmDoorPos: { animals: null, sugarcane: null },
+    netherPortals: { overworld: null, nether: null },
+    buildSite: null,
+    currentMission: null,
+    ignoredMission: false,
+    ignoredWorldMemory: false,
+    legacyWorldMemory: false,
+    automation: { lastAnimalFarmDay: null, nextAnimalFarmDay: null },
+    ...extra
+  }
+}
+
+function currentServerKey() {
+  try {
+    const config = loadConfig()
+    const server = config.server || {}
+    return [
+      String(server.host || '').trim().toLowerCase(),
+      String(Number(server.port) || ''),
+      String(server.username || '').trim().toLowerCase(),
+      String(server.version || '').trim().toLowerCase()
+    ].join('|')
+  } catch {
+    return null
+  }
+}
+
+function hasWorldMemory(memory) {
+  return Boolean(
+    memory &&
+    (memory.base || memory.container || memory.farms || memory.farmContainers ||
+      memory.farmDoors || memory.netherPortals || memory.buildSite || memory.mission)
+  )
+}
 
 function vecToJSON(pos) {
   if (!pos) return null
@@ -64,8 +107,9 @@ function serializeMission(mission) {
 
 function deserializeMission(mission) {
   if (!mission || typeof mission !== 'object') return null
-  if (mission.type === 'mine' && !resourceTargetByKey(mission.targetKey)) return null
-  if (!['mine', 'hunt', 'farmAnimals', 'farmSugarCane', 'farmAll'].includes(mission.type)) return null
+  if (!V2_STABLE_MISSION_TYPES.has(mission.type)) return null
+  if ((mission.type === 'mine' || mission.type === 'collect') && !resourceTargetByKey(mission.targetKey)) return null
+  if (mission.status && mission.status !== 'running') return null
 
   return {
     type: mission.type,
@@ -74,7 +118,7 @@ function deserializeMission(mission) {
     progress: Number(mission.progress) || 0,
     deposited: Number(mission.deposited) || 0,
     trips: Number(mission.trips) || 0,
-    status: mission.status === 'running' ? 'paused' : (mission.status || 'paused'),
+    status: 'paused',
     priority: Number(mission.priority) || 0,
     startedAt: mission.startedAt || Date.now()
   }
@@ -83,6 +127,18 @@ function deserializeMission(mission) {
 function loadMemory() {
   try {
     const memory = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'))
+    const serverKey = currentServerKey()
+    const savedServerKey = memory.serverKey || null
+
+    if (serverKey && savedServerKey && savedServerKey !== serverKey) {
+      return emptyMemory({ ignoredWorldMemory: true })
+    }
+
+    if (serverKey && !savedServerKey && hasWorldMemory(memory)) {
+      return emptyMemory({ ignoredWorldMemory: true, legacyWorldMemory: true })
+    }
+
+    const currentMission = deserializeMission(memory.mission)
     return {
       basePos: vecFromJSON(memory.base),
       baseContainerPos: vecFromJSON(memory.container),
@@ -91,7 +147,10 @@ function loadMemory() {
       farmDoorPos: loadVecMap(memory.farmDoors),
       netherPortals: loadPortalMap(memory.netherPortals),
       buildSite: vecFromJSON(memory.buildSite),
-      currentMission: deserializeMission(memory.mission),
+      currentMission,
+      ignoredMission: Boolean(memory.mission && !currentMission),
+      ignoredWorldMemory: false,
+      legacyWorldMemory: false,
       automation: {
         lastAnimalFarmDay: typeof memory.lastAnimalFarmDay === 'number'
           ? memory.lastAnimalFarmDay
@@ -104,17 +163,7 @@ function loadMemory() {
       }
     }
   } catch {
-    return {
-      basePos: null,
-      baseContainerPos: null,
-      farmZones: { animals: null, sugarcane: null },
-      farmContainerPos: { animals: null, sugarcane: null },
-      farmDoorPos: { animals: null, sugarcane: null },
-      netherPortals: { overworld: null, nether: null },
-      buildSite: null,
-      currentMission: null,
-      automation: { lastAnimalFarmDay: null, nextAnimalFarmDay: null }
-    }
+    return emptyMemory()
   }
 }
 
@@ -131,7 +180,8 @@ function saveMemory(state, logError = () => {}) {
         netherPortals: savePortalMap(state.netherPortals),
         buildSite: vecToJSON(state.buildSite),
         mission: serializeMission(state.currentMission),
-        automation: state.automation || { lastAnimalFarmDay: null, nextAnimalFarmDay: null }
+        automation: state.automation || { lastAnimalFarmDay: null, nextAnimalFarmDay: null },
+        serverKey: currentServerKey()
       }, null, 2)
     )
   } catch (err) {

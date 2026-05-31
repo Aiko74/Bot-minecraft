@@ -134,13 +134,23 @@ function createChestHelpers(deps) {
 
   async function baseContainerBlocks(maxDistance = 12, options = {}) {
     const travel = options.travel !== false
+    const quiet = options.quiet === true
     const basePos = deps.getBasePos()
+    const baseOnly = options.baseOnly === true
+    const baseContainerPos = deps.getBaseContainerPos()
 
     if (basePos && deps.bot.entity.position.distanceTo(basePos) > 8) {
       if (!travel) return []
 
-      const reachedBase = await deps.safeGoBase()
+      const reachedBase = await deps.safeGoBase({ quiet })
       if (!reachedBase) return []
+    }
+
+    if (baseOnly && baseContainerPos) {
+      const savedContainer = deps.bot.blockAt(baseContainerPos)
+      if (isContainerBlock(savedContainer)) return [savedContainer]
+      if (!quiet) deps.safeChat('Coffre de base introuvable. Refais setbase près du coffre.', 5000)
+      return []
     }
 
     const blocks = findNearbyContainers(maxDistance, deps.bot.entity.position, {
@@ -150,11 +160,10 @@ function createChestHelpers(deps) {
     })
 
     if (blocks.length === 0) {
-      deps.safeChat('Aucun coffre ou baril proche de la base.', 5000)
+      if (!quiet) deps.safeChat('Aucun coffre ou baril proche de la base.', 5000)
       return []
     }
 
-    const baseContainerPos = deps.getBaseContainerPos()
     blocks.sort((a, b) => {
       const aSaved = baseContainerPos && sameBlockPos(a.position, baseContainerPos) ? 0 : 1
       const bSaved = baseContainerPos && sameBlockPos(b.position, baseContainerPos) ? 0 : 1
@@ -162,7 +171,7 @@ function createChestHelpers(deps) {
       return a.position.distanceTo(deps.bot.entity.position) - b.position.distanceTo(deps.bot.entity.position)
     })
 
-    if (!baseContainerPos) {
+    if (!baseContainerPos && !baseOnly) {
       deps.setBaseContainerPos(blocks[0].position.clone())
       deps.saveMemory()
     }
@@ -215,22 +224,36 @@ function createChestHelpers(deps) {
     return [...plan.values()].reduce((total, entry) => total + Math.max(0, entry.remaining), 0)
   }
 
-  async function depositPlanToContainers(plan, blocks, label = 'coffre') {
+  function formatDepositResult(result, details) {
+    return details ? result : result.ok
+  }
+
+  async function depositPlanToContainers(plan, blocks, label = 'coffre', options = {}) {
+    const details = options.details === true
+    const quiet = options.quiet === true
     const startingCount = planRemainingCount(plan)
+    const result = {
+      ok: startingCount === 0,
+      startingCount,
+      depositedCount: 0,
+      remaining: startingCount,
+      opened: false
+    }
     if (deps.getFarmNoDigActive()) console.log(`[farm][chest] items à déposer ${startingCount}`)
     if (startingCount === 0) {
       if (deps.getFarmNoDigActive()) console.log('[farm][chest] rien à déposer')
-      return true
+      return formatDepositResult(result, details)
     }
-    if (!blocks || blocks.length === 0) return false
+    if (!blocks || blocks.length === 0) return formatDepositResult(result, details)
 
     for (const block of blocks) {
       if (planRemainingCount(plan) === 0) break
 
       let container = null
       try {
-        container = await openContainerBlock(block)
+        container = await openContainerBlock(block, { quiet })
         if (!container) continue
+        result.opened = true
         if (deps.getFarmNoDigActive()) deps.setLastFarmDepositOpened(true)
 
         for (const entry of plan.values()) {
@@ -252,6 +275,7 @@ function createChestHelpers(deps) {
           const after = deps.inventoryCount(entry.name)
           const depositedNow = Math.max(0, before - after)
           entry.remaining -= depositedNow
+          result.depositedCount += depositedNow
           if (deps.getFarmNoDigActive() && depositedNow > 0) {
             deps.addLastFarmDepositedCount(depositedNow)
             console.log(`[farm][chest] item déposé ${entry.name} x${depositedNow}`)
@@ -266,21 +290,26 @@ function createChestHelpers(deps) {
     }
 
     const remaining = planRemainingCount(plan)
+    result.remaining = remaining
+    result.ok = remaining === 0
     if (deps.getFarmNoDigActive() && deps.getLastFarmDepositedCount() > 0) {
       console.log(`[farm][chest] dépôt réussi ${deps.getLastFarmDepositedCount()} items`)
-      return true
+      result.ok = true
+      return formatDepositResult(result, details)
     }
 
     if (remaining > 0) {
-      deps.safeChat(`${label}: depot incomplet, coffre plein ou item refuse (${remaining} items).`, 8000)
-      return false
+      console.log(`[chest] ${label}: depot incomplet, coffre plein ou item refuse (${remaining} items).`)
+      if (!quiet) deps.safeChat(`${label}: depot incomplet, coffre plein ou item refuse (${remaining} items).`, 8000)
+      return formatDepositResult(result, details)
     }
 
     if (deps.getFarmNoDigActive()) console.log(`[farm][chest] dépôt réussi ${startingCount} items`)
-    return true
+    return formatDepositResult(result, details)
   }
 
-  async function openContainerBlock(containerBlock) {
+  async function openContainerBlock(containerBlock, options = {}) {
+    const quiet = options.quiet === true
     if (!containerBlock) return null
     if (!deps.isValidPos(containerBlock.position)) {
       if (deps.getFarmNoDigActive()) console.log('[farm][path] cible invalide ignorée coffre')
@@ -345,6 +374,7 @@ function createChestHelpers(deps) {
         canDig: false,
         canPlace: deps.getFarmNoDigActive() ? false : undefined,
         canOpenDoors: deps.getFarmNoDigActive() ? false : undefined,
+        quiet,
         successCheck: () => containerBlock.position.distanceTo(deps.bot.entity.position) <= 4.5
       })
       if (!reached) return null
@@ -358,7 +388,7 @@ function createChestHelpers(deps) {
       return opened
     } catch (err) {
       deps.logError('open container error', err)
-      deps.safeChat("Impossible d'ouvrir ce coffre/baril.", 8000)
+      if (!quiet) deps.safeChat("Impossible d'ouvrir ce coffre/baril.", 8000)
       return null
     }
   }
@@ -387,11 +417,28 @@ function createChestHelpers(deps) {
     return openContainerBlock(containerBlock)
   }
 
-  async function takeLoadoutFromChest() {
+  function emptyLoadoutResult() {
+    return {
+      ok: false,
+      withdrawn: [],
+      count: 0
+    }
+  }
+
+  function formatLoadoutResult(result, details) {
+    return details ? result : result.ok
+  }
+
+  async function takeLoadoutFromChest(options = {}) {
+    const details = options.details === true
+    const result = emptyLoadoutResult()
+
     try {
-      const blocks = await baseContainerBlocks(12)
-      if (blocks.length === 0) return false
-      let withdrewSomething = false
+      const blocks = await baseContainerBlocks(12, {
+        baseOnly: options.baseOnly === true,
+        quiet: options.quiet === true
+      })
+      if (blocks.length === 0) return formatLoadoutResult(result, details)
 
       for (const block of blocks) {
         let container = null
@@ -404,8 +451,17 @@ function createChestHelpers(deps) {
             if (count <= 0) continue
 
             try {
+              const before = deps.inventoryCount(item.name)
               await container.withdraw(item.type, null, count)
-              withdrewSomething = true
+              const after = deps.inventoryCount(item.name)
+              const gained = Math.max(0, after - before)
+              if (gained > 0) {
+                result.ok = true
+                result.count += gained
+                const existing = result.withdrawn.find(entry => entry.name === item.name)
+                if (existing) existing.count += gained
+                else result.withdrawn.push({ name: item.name, count: gained })
+              }
             } catch (err) {
               deps.logError('withdraw error', err)
             }
@@ -415,10 +471,10 @@ function createChestHelpers(deps) {
         }
       }
 
-      return withdrewSomething
+      return formatLoadoutResult(result, details)
     } catch (err) {
       deps.logError('loadout chest error', err)
-      return false
+      return formatLoadoutResult(result, details)
     }
   }
 
@@ -426,19 +482,41 @@ function createChestHelpers(deps) {
     try {
       if (options.unequip === true) await unequipCarriedEquipment()
 
-      const blocks = await baseContainerBlocks(12)
-      if (blocks.length === 0) return false
-
       const plan = buildDepositPlan(null, {
         keepFood: options.keepFood !== false,
         keepLoadout: options.keepLoadout !== false,
         keepPathBlocks: options.keepPathBlocks === true
       })
+      const plannedCount = planRemainingCount(plan)
+      const blocks = await baseContainerBlocks(12, {
+        baseOnly: options.baseOnly === true,
+        quiet: options.quiet !== false
+      })
+      if (blocks.length === 0) {
+        const emptyResult = {
+          ok: plannedCount === 0,
+          startingCount: plannedCount,
+          depositedCount: 0,
+          remaining: plannedCount,
+          opened: false
+        }
+        return formatDepositResult(emptyResult, options.details === true)
+      }
 
-      return depositPlanToContainers(plan, blocks, 'Base')
+      return depositPlanToContainers(plan, blocks, 'Base', {
+        details: options.details === true,
+        quiet: options.quiet !== false
+      })
     } catch (err) {
       deps.logError('store error', err)
-      return false
+      const failedResult = {
+        ok: false,
+        startingCount: 1,
+        depositedCount: 0,
+        remaining: 1,
+        opened: false
+      }
+      return formatDepositResult(failedResult, options.details === true)
     }
   }
 

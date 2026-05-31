@@ -28,6 +28,7 @@ const commands = [
   require('./range'),
   require('./explore'),
   require('./exploreNether'),
+  require('./collect'),
   require('./mine'),
   require('./listBlueprints'),
   require('./setFarm'),

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const net = require('net')
@@ -12,6 +12,7 @@ const USER_ROOT = app.isPackaged ? app.getPath('userData') : ROOT
 const DATA_DIR = app.isPackaged ? path.join(USER_ROOT, 'data') : path.join(ROOT, 'data')
 const CONFIG_FILE = path.join(USER_ROOT, 'config.json')
 const MEMORY_FILE = path.join(USER_ROOT, 'bot-memory.json')
+const LOGS_DIR = path.join(USER_ROOT, 'logs')
 const DESKTOP_SETTINGS_FILE = path.join(DATA_DIR, 'desktop-settings.json')
 
 let mainWindow = null
@@ -35,6 +36,17 @@ function pushLog(line) {
     mainWindow.webContents.send('bot:log', botLogs[botLogs.length - 1])
     mainWindow.webContents.send('bot:status', botStatus())
   }
+}
+
+function appErrorMessage(err) {
+  const raw = String((err && err.message) || err || '')
+  const lower = raw.toLowerCase()
+  if (lower.includes('econnreset')) return 'Connexion interrompue par le serveur. Verifie la version Minecraft, le port et si le serveur est ouvert.'
+  if (lower.includes('econnrefused')) return 'Connexion refusee. Le serveur est ferme, le port est incorrect ou Aternos est encore en demarrage.'
+  if (lower.includes('timed out') || lower.includes('timeout')) return 'Delai depasse. Le serveur ne repond pas assez vite ou le port est incorrect.'
+  if (lower.includes('enotfound')) return "Adresse serveur introuvable. Verifie l'IP ou le nom du serveur."
+  if (lower.includes('socketclosed')) return 'Connexion fermee. Verifie que le bot n est pas deja connecte et que le serveur accepte les connexions.'
+  return raw || 'Erreur inconnue.'
 }
 
 function pushConsole(line, level = 'info') {
@@ -88,6 +100,21 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2))
 }
 
+function serverIdentity(config = {}) {
+  const server = config.server || config || {}
+  return [
+    String(server.host || '').trim().toLowerCase(),
+    String(Number(server.port) || ''),
+    String(server.username || '').trim().toLowerCase(),
+    String(server.version || '').trim().toLowerCase()
+  ].join('|')
+}
+
+function clearWorldMemory(reason) {
+  writeJson(MEMORY_FILE, {})
+  pushConsole(reason || 'Memoire monde reinitialisee.')
+}
+
 function seedJsonFile(targetPath, sourcePath, fallback) {
   if (fs.existsSync(targetPath)) return
   fs.mkdirSync(path.dirname(targetPath), { recursive: true })
@@ -115,6 +142,7 @@ function ensureUserDataFiles() {
   }
 
   fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.mkdirSync(LOGS_DIR, { recursive: true })
   seedJsonFile(CONFIG_FILE, path.join(ROOT, 'config.example.json'), defaultConfig)
 }
 
@@ -215,6 +243,11 @@ function overview() {
     settings: readSettings(),
     bot: botStatus(),
     console: desktopConsole.slice(-100),
+    version: app.getVersion(),
+    paths: {
+      configDir: path.dirname(CONFIG_FILE),
+      logsDir: LOGS_DIR
+    },
     commands: commandCategories,
     allCommands: flattenCommands(),
     blueprints: blueprintSummary()
@@ -228,7 +261,7 @@ function startBot() {
   botConnectionState = 'starting'
   botLastError = null
   pushLog('[desktop] demarrage du bot')
-  pushConsole('Aiko V1 test: demarrage du bot.')
+  pushConsole('Aiko V2 test: demarrage du bot.')
   pushConsole('Dans Minecraft, Aiko repond seulement aux owners configures.')
   pushConsole('Commandes conseillees: status, setbase, prepare, mine 16 fer, retour base.')
   pushConsole('Les cartes "Feature incoming" sont visibles mais encore en developpement.')
@@ -238,7 +271,8 @@ function startBot() {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
       AIKO_CONFIG_FILE: CONFIG_FILE,
-      AIKO_MEMORY_FILE: MEMORY_FILE
+      AIKO_MEMORY_FILE: MEMORY_FILE,
+      AIKO_STRICT_MEMORY_SCOPE: '1'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   })
@@ -253,15 +287,15 @@ function startBot() {
 
   botProcess.on('error', err => {
     botConnectionState = 'error'
-    botLastError = err.message
-    pushLog(`[desktop] erreur bot: ${err.message}`)
-    pushConsole(`Erreur bot: ${err.message}`, 'error')
+    botLastError = appErrorMessage(err)
+    pushLog(`[desktop] erreur bot: ${botLastError}`)
+    pushConsole(`Erreur bot: ${botLastError}`, 'error')
   })
 
   botProcess.on('close', code => {
     if (botConnectionState !== 'error') botConnectionState = 'stopped'
     pushLog(`[desktop] bot arrete avec code ${code}`)
-    pushConsole(`Bot arrete avec code ${code}.`, code === 0 ? 'info' : 'warn')
+    pushConsole(code === 0 ? 'Bot arrete proprement.' : `Bot arrete de facon inattendue (code ${code}).`, code === 0 ? 'info' : 'warn')
     botProcess = null
     botStartedAt = null
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -299,6 +333,7 @@ async function restartBot() {
 
 function saveConfig(patch) {
   const current = readJson(CONFIG_FILE, {})
+  const previousServerIdentity = serverIdentity(current)
   const next = {
     ...current,
     server: {
@@ -316,7 +351,19 @@ function saveConfig(patch) {
     next.server.port = Number(next.server.port)
   }
 
+  const nextServerIdentity = serverIdentity(next)
+  const serverChanged = previousServerIdentity !== nextServerIdentity
+
   writeJson(CONFIG_FILE, next)
+
+  if (serverChanged) {
+    clearWorldMemory('Serveur modifie: ancienne base/memoire monde effacee. Refais setbase sur cette map.')
+    if (botProcess) {
+      pushConsole('Le bot etait lance avec une ancienne cible: arret automatique. Relance-le avec la nouvelle config.', 'warn')
+      stopBot()
+    }
+  }
+
   pushLog('[desktop] configuration sauvegardee')
   pushConsole('Configuration sauvegardee automatiquement.')
   return next
@@ -394,16 +441,17 @@ function testConnection(target = {}) {
       if (finished) return
       finished = true
       socket.destroy()
+      const cleanMessage = ok ? 'Serveur joignable.' : appErrorMessage(message)
       const result = {
         ok,
         host,
         port,
         latencyMs: Date.now() - startedAt,
-        message
+        message: cleanMessage
       }
       pushConsole(ok
         ? `Test connexion OK ${host}:${port} (${result.latencyMs}ms)`
-        : `Test connexion echoue ${host}:${port}: ${message}`,
+        : `Test connexion echoue ${host}:${port}: ${cleanMessage}`,
       ok ? 'info' : 'error')
       resolve(result)
     }
@@ -574,13 +622,24 @@ async function runDesktopConsole(command) {
 }
 
 function createWindow() {
+  Menu.setApplicationMenu(null)
+
   mainWindow = new BrowserWindow({
-    width: 1320,
-    height: 860,
-    minWidth: 1080,
+    width: 1280,
+    height: 720,
+    minWidth: 1280,
     minHeight: 720,
-    title: 'Minecraft Survival Assistant',
-    backgroundColor: '#05070a',
+    maxWidth: 1280,
+    maxHeight: 720,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    frame: false,
+    transparent: true,
+    hasShadow: true,
+    titleBarStyle: 'hidden',
+    title: 'Aiko Assistant 2077',
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -594,6 +653,10 @@ function createWindow() {
   } else {
     mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent('<body style="background:#05070a;color:#eef7ff;font-family:system-ui;padding:32px"><h1>Aiko Assistant</h1><p>Interface non compilee. Lance npm run desktop:build puis npm run desktop.</p></body>')}`)
   }
+}
+
+function focusedWindow() {
+  return BrowserWindow.getFocusedWindow() || mainWindow
 }
 
 ipcMain.handle('app:overview', () => overview())
@@ -613,8 +676,22 @@ ipcMain.handle('network:local-ipv4', () => detectLocalIpv4())
 ipcMain.handle('desktop:console', (_event, command) => runDesktopConsole(command))
 ipcMain.handle('folder:blueprints', () => shell.openPath(path.join(ROOT, 'blueprints')))
 ipcMain.handle('folder:project', () => shell.openPath(ROOT))
+ipcMain.handle('folder:config', () => shell.openPath(path.dirname(CONFIG_FILE)))
+ipcMain.handle('folder:logs', () => {
+  fs.mkdirSync(LOGS_DIR, { recursive: true })
+  return shell.openPath(LOGS_DIR)
+})
+ipcMain.handle('window:minimize', () => {
+  const win = focusedWindow()
+  if (win && !win.isDestroyed()) win.minimize()
+})
+ipcMain.handle('window:close', () => {
+  const win = focusedWindow()
+  if (win && !win.isDestroyed()) win.close()
+})
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null)
   ensureUserDataFiles()
   createWindow()
 

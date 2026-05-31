@@ -1,6 +1,11 @@
 async function handleLegacyCommand(ctx, intent, username) {
   const h = ctx.helpers
 
+  if (intent.type === 'farm') {
+    ctx.say(farmDisabledMessage(intent.farmKind))
+    return true
+  }
+
   await h.runExclusive(async () => {
     if (intent.type === 'return') {
       await h.returnBase({ stopMission: true })
@@ -8,10 +13,6 @@ async function handleLegacyCommand(ctx, intent, username) {
       await h.prepareMission({ missionType: 'hunt', quiet: true })
       if (ctx.state.getStopRequested()) return
       await h.hunt(intent.amount)
-    } else if (intent.type === 'farm') {
-      await h.prepareMission({ missionType: 'farm' })
-      if (ctx.state.getStopRequested()) return
-      await h.runFarm(intent.farmKind, { cookMeat: intent.cookMeat === true })
     } else if (intent.type === 'scanBuildSite') {
       await h.scanAndSetBuildSite(intent.blueprint)
     } else if (intent.type === 'prepareBlueprint') {
@@ -26,6 +27,12 @@ async function handleLegacyCommand(ctx, intent, username) {
   })
 
   return true
+}
+
+function farmDisabledMessage(farmKind) {
+  if (farmKind === 'animals') return '🐄 Ferme animaux désactivée en V2. Refonte prévue plus tard.'
+  if (farmKind === 'sugarcane') return '🌾 Ferme canne désactivée en V2. Refonte prévue plus tard.'
+  return '🌾 Farms désactivées en V2. Refonte prévue plus tard.'
 }
 
 module.exports = {

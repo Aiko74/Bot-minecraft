@@ -3,6 +3,6 @@ module.exports = {
   aliases: ['pause', 'pause mission'],
   intentTypes: ['pause'],
   run: async ctx => {
-    ctx.helpers.pauseMission('Mission en pause. Dis reprendre pour continuer.')
+    ctx.say('⏸️ Pause désactivée en V2. Utilise stop si tu veux annuler.')
   }
 }

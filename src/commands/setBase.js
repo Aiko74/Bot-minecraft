@@ -11,11 +11,6 @@ module.exports = {
     if (baseContainerPos) ctx.state.setBaseContainerPos(baseContainerPos)
     ctx.helpers.saveMemory()
 
-    if (container) {
-      ctx.say(`Base enregistree avec coffre: ${basePos.x} ${basePos.y} ${basePos.z}.`)
-    } else {
-      ctx.say(`Base enregistree: ${basePos.x} ${basePos.y} ${basePos.z}. Aucun coffre trouve proche.`)
-    }
-    ctx.say("Astuce: si la base a des portes, laisse une entree simple ou refais setbase pres de l'entree/coffre.")
+    ctx.say(baseContainerPos ? '🏠 Base ajoutée.' : '🏠 Base ajoutée. Aucun coffre proche détecté.')
   }
 }

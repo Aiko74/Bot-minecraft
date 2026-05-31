@@ -44,6 +44,7 @@ const {
   HAZARD_BLOCK_NAMES,
   HOSTILE_ENTITIES,
   HUNT_TARGETS,
+  NEUTRAL_ENTITIES,
   RAW_TO_COOKED,
   SWORD_MATERIAL_ITEMS,
   SWORD_PRIORITY,
@@ -116,8 +117,11 @@ let automationState = { lastAnimalFarmDay: null, nextAnimalFarmDay: null }
 let farmDoorIssues = []
 let lastFarmDepositOpened = false
 let lastFarmDepositedCount = 0
+let woodNoAxeWarned = false
+let lastCreativeWarningAt = 0
 
 const chatCooldowns = new Map()
+const lavaRiskLogAt = new Map()
 let originalDig = null
 let originalPlaceBlock = null
 let farmProtectionGuardInstalled = false
@@ -258,6 +262,7 @@ const missionRuntime = createMissionRuntime({
   food: foodHelpers,
   getBasePos: () => basePos,
   getCurrentMission: () => currentMission,
+  isNearBase,
   isMissionActive: () => missionActive,
   isStopRequested: () => stopRequested,
   logMission,
@@ -287,6 +292,7 @@ const dangerHelpers = createDangerHelpers({
   goals,
   hazardBlockNames: HAZARD_BLOCK_NAMES,
   hostileEntities: HOSTILE_ENTITIES,
+  neutralEntities: NEUTRAL_ENTITIES,
   isCombatRunning: () => combatRunning,
   isSafetyRunning: () => safetyRunning,
   isStopRequested: () => stopRequested,
@@ -465,7 +471,7 @@ function farmGoalNear(pos, range = 2, label = 'cible ferme') {
 
 function configureMovements() {
   defaultMove = createDefaultMovements({
-    Movements, bot, hazardBlockNames: HAZARD_BLOCK_NAMES, hostileEntities: HOSTILE_ENTITIES, mcData
+    Movements, bot, hazardBlockNames: HAZARD_BLOCK_NAMES, hostileEntities: HOSTILE_ENTITIES, neutralEntities: NEUTRAL_ENTITIES, mcData
   })
   bot.pathfinder.thinkTimeout = CONFIG.pathThinkTimeout
   bot.pathfinder.setMovements(defaultMove)
@@ -565,6 +571,7 @@ async function safeGoto(goal, label = 'destination', options = {}) {
     const previousCanOpenDoors = defaultMove.canOpenDoors
     const previousAllow1by1Towers = defaultMove.allow1by1towers
     const previousSafeToBreak = defaultMove.safeToBreak
+    const previousLiquidCost = defaultMove.liquidCost
     const previousScaffoldingBlocks = Array.isArray(defaultMove.scafoldingBlocks)
       ? [...defaultMove.scafoldingBlocks]
       : null
@@ -580,6 +587,7 @@ async function safeGoto(goal, label = 'destination', options = {}) {
         defaultMove.allow1by1towers = false
         if (Array.isArray(defaultMove.scafoldingBlocks)) defaultMove.scafoldingBlocks = []
       }
+      if (options.avoidWater === true) defaultMove.liquidCost = Math.max(defaultMove.liquidCost || 0, 80)
       defaultMove.canOpenDoors = options.canOpenDoors !== false
       bot.pathfinder.setMovements(defaultMove)
       await withTimeout(
@@ -594,6 +602,7 @@ async function safeGoto(goal, label = 'destination', options = {}) {
       defaultMove.canOpenDoors = previousCanOpenDoors
       defaultMove.allow1by1towers = previousAllow1by1Towers
       defaultMove.safeToBreak = previousSafeToBreak
+      defaultMove.liquidCost = previousLiquidCost
       if (previousScaffoldingBlocks) defaultMove.scafoldingBlocks = previousScaffoldingBlocks
       bot.pathfinder.setMovements(defaultMove)
       if (options.successCheck && !options.successCheck()) return false
@@ -603,6 +612,7 @@ async function safeGoto(goal, label = 'destination', options = {}) {
       defaultMove.canOpenDoors = previousCanOpenDoors
       defaultMove.allow1by1towers = previousAllow1by1Towers
       defaultMove.safeToBreak = previousSafeToBreak
+      defaultMove.liquidCost = previousLiquidCost
       if (previousScaffoldingBlocks) defaultMove.scafoldingBlocks = previousScaffoldingBlocks
       bot.pathfinder.setMovements(defaultMove)
 
@@ -714,6 +724,211 @@ function rotatedVector(dx, dz, radians) {
     x: dx * cos - dz * sin,
     z: dx * sin + dz * cos
   }
+}
+
+function horizontalDistance(a, b) {
+  if (!isValidPos(a) || !isValidPos(b)) return Infinity
+  const dx = a.x - b.x
+  const dz = a.z - b.z
+  return Math.sqrt(dx * dx + dz * dz)
+}
+
+function distanceToBase() {
+  if (!basePos) return Infinity
+  return bot.entity.position.distanceTo(basePos)
+}
+
+function horizontalDistanceToBase() {
+  if (!basePos) return Infinity
+  return horizontalDistance(bot.entity.position, basePos)
+}
+
+function baseReturnSurfaceY() {
+  if (!basePos) return 62
+  return Math.max(48, Math.min(Math.floor(basePos.y) - 3, 64))
+}
+
+function hasOpenAirAboveForReturn(height = 12) {
+  const origin = floorVec(bot.entity.position)
+  let blocked = 0
+
+  for (let dy = 2; dy <= height; dy++) {
+    const block = bot.blockAt(origin.offset(0, dy, 0))
+    if (!block) continue
+    if (!isAirLike(block) && !isWaterLikeBlock(block)) blocked++
+    if (blocked > 1) return false
+  }
+
+  return true
+}
+
+function needsBaseReturnClimb() {
+  if (!basePos) return false
+  const currentY = Math.floor(bot.entity.position.y)
+  const surfaceY = baseReturnSurfaceY()
+  if (currentY >= surfaceY) return false
+  if (currentY >= surfaceY - 8 && hasOpenAirAboveForReturn(10)) return false
+  if (currentY > 45 && hasOpenAirAboveForReturn(14)) return false
+  return currentY < surfaceY
+}
+
+function shouldUseLongRangeBaseReturn() {
+  return horizontalDistanceToBase() > 64 || needsBaseReturnClimb()
+}
+
+function goalNearXZOrNear(pos, range = 6) {
+  return goals.GoalNearXZ
+    ? new goals.GoalNearXZ(pos.x, pos.z, range)
+    : new goals.GoalNear(pos.x, pos.y, pos.z, range)
+}
+
+function baseReturnDirectionVector() {
+  if (!basePos) return miningDirectionVector()
+  const current = bot.entity.position
+  const dx = basePos.x - current.x
+  const dz = basePos.z - current.z
+
+  if (Math.abs(dx) > Math.abs(dz)) {
+    return { x: dx > 0 ? 1 : -1, z: 0 }
+  }
+
+  if (Math.abs(dz) > 0.2) return { x: 0, z: dz > 0 ? 1 : -1 }
+  return miningDirectionVector()
+}
+
+async function climbTowardSurfaceForBaseReturn(options = {}) {
+  if (!basePos) return false
+  if (!needsBaseReturnClimb()) return true
+
+  const ignoreStop = options.ignoreStop === true
+  const targetY = baseReturnSurfaceY()
+  const startY = Math.floor(bot.entity.position.y)
+  const maxSteps = Math.min(140, Math.max(32, targetY - startY + 18))
+  let blockedRounds = 0
+
+  console.log(`[base-return] underground y=${startY} targetY=${targetY}`)
+
+  for (let step = 0; step < maxSteps && (ignoreStop || !stopRequested); step++) {
+    const currentY = Math.floor(bot.entity.position.y)
+    if (currentY >= targetY) {
+      console.log(`[base-return] surface-ready y=${currentY}`)
+      return true
+    }
+
+    const primary = baseReturnDirectionVector()
+    let moved = false
+    for (const direction of alternateDirections(primary)) {
+      moved = await digStairStepUp(direction, 'retour base montee')
+      if (moved) break
+    }
+
+    if (!moved) {
+      blockedRounds++
+      console.log('[base-return] stair step failed, trying alternate')
+      if (blockedRounds >= 8) return false
+      await sleep(250)
+    } else {
+      blockedRounds = 0
+      if (step % 12 === 0) {
+        console.log(`[base-return] stair up step ${step + 1}/${maxSteps} y=${Math.floor(bot.entity.position.y)}`)
+      }
+      await collectNearbyDrops(4)
+    }
+  }
+
+  return Math.floor(bot.entity.position.y) >= targetY
+}
+
+function baseReturnCheckpoint(stepDistance, angle = 0) {
+  const current = bot.entity.position
+  const distance = horizontalDistance(current, basePos)
+  if (!Number.isFinite(distance) || distance < 1) return floorVec(current)
+
+  const dx = (basePos.x - current.x) / distance
+  const dz = (basePos.z - current.z) / distance
+  const dir = rotatedVector(dx, dz, angle)
+
+  return new Vec3(
+    Math.floor(current.x + dir.x * stepDistance),
+    Math.floor(current.y),
+    Math.floor(current.z + dir.z * stepDistance)
+  )
+}
+
+async function safeGoBaseLongRange(options = {}) {
+  if (!basePos) return false
+  const ignoreStop = options.ignoreStop === true
+  const initialDistance = Math.round(distanceToBase())
+
+  if (!shouldUseLongRangeBaseReturn()) return true
+
+  console.log(`[base-return] distance=${initialDistance} mode=long-range`)
+
+  if (needsBaseReturnClimb()) {
+    const climbed = await climbTowardSurfaceForBaseReturn({ ignoreStop })
+    if (!climbed && horizontalDistanceToBase() > 70) {
+      console.log('[base-return] underground climb failed')
+      return false
+    }
+  }
+
+  let checkpointIndex = 0
+  let noProgress = 0
+  const maxCheckpoints = Math.min(12, Math.max(3, Math.ceil(horizontalDistanceToBase() / 32) + 2))
+
+  while (horizontalDistanceToBase() > 54 && checkpointIndex < maxCheckpoints && (ignoreStop || !stopRequested)) {
+    checkpointIndex++
+    const beforeBaseDistance = horizontalDistanceToBase()
+    const stepDistance = Math.min(36, Math.max(24, beforeBaseDistance / 4))
+    const angles = [0, Math.PI / 7, -Math.PI / 7, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2]
+    let moved = false
+
+    for (let i = 0; i < angles.length; i++) {
+      const checkpoint = baseReturnCheckpoint(stepDistance, angles[i])
+      const label = `checkpoint ${checkpointIndex}/${maxCheckpoints}`
+      console.log(`[base-return] ${label} ${checkpoint.x} ${checkpoint.y} ${checkpoint.z}`)
+
+      const reached = await safeGoto(goalNearXZOrNear(checkpoint, 7), 'base checkpoint', {
+        attempts: 1,
+        timeoutMs: 9000,
+        canDig: false,
+        canPlace: false,
+        canOpenDoors: true,
+        avoidWater: true,
+        ignoreStop,
+        quiet: true,
+        successCheck: () => horizontalDistanceToBase() <= 54 ||
+          horizontalDistance(bot.entity.position, checkpoint) <= 8 ||
+          horizontalDistanceToBase() <= beforeBaseDistance - 10
+      })
+
+      const afterBaseDistance = horizontalDistanceToBase()
+      if (reached || afterBaseDistance <= beforeBaseDistance - 8) {
+        moved = true
+        noProgress = 0
+        break
+      }
+
+      console.log('[base-return] checkpoint failed, trying alternate')
+      if (stopRequested && !ignoreStop) return false
+    }
+
+    if (!moved) {
+      noProgress++
+      if (needsBaseReturnClimb()) {
+        const climbed = await climbTowardSurfaceForBaseReturn({ ignoreStop })
+        if (climbed) continue
+      }
+      if (noProgress >= 2) return false
+    }
+  }
+
+  if (horizontalDistanceToBase() <= 60 || isInsideBase(8)) {
+    console.log(`[base-return] reached base radius=${Math.round(horizontalDistanceToBase())}`)
+    return true
+  }
+
+  return false
 }
 
 async function travelToPosition(pos, label = 'destination', options = {}) {
@@ -875,6 +1090,7 @@ async function gatherWoodLogs(minLogs = 2) {
 
   let failures = 0
   while (inventoryCountAny(LOG_ITEM_NAMES) < minLogs && failures < 8 && !stopRequested) {
+    if (stopRequested) return false
     const block = findTargetBlock(woodTarget)
     if (!block) {
       failures++
@@ -892,6 +1108,8 @@ async function gatherWoodLogs(minLogs = 2) {
       continue
     }
 
+    if (stopRequested) return false
+
     const freshBlock = bot.blockAt(block.position)
     if (!freshBlock || !woodTarget.blocks.includes(freshBlock.name)) {
       failures++
@@ -899,6 +1117,12 @@ async function gatherWoodLogs(minLogs = 2) {
     }
 
     try {
+      const axeReady = await equipAxeForWoodLog()
+      if (!axeReady) {
+        failures++
+        continue
+      }
+      if (stopRequested) return false
       await bot.dig(freshBlock, true)
       await collectNearbyDrops(6)
       await sleep(250)
@@ -1205,29 +1429,38 @@ async function craftBestSword() {
   return false
 }
 
-async function ensureCombatGear() {
+async function ensureCombatGear(options = {}) {
+  if (stopRequested) return false
+
   await toolHelpers.equipArmor()
+  if (stopRequested) return false
   await toolHelpers.equipShield()
+  if (stopRequested) return false
 
   if (toolHelpers.findBestSword()) {
     await toolHelpers.equipWeapon()
     return true
   }
 
-  if (basePos) {
+  if (basePos && options.allowBaseTrip !== false) {
     safeChat('Je vais chercher ou fabriquer une epee.', 8000)
     await safeGoBase()
+    if (stopRequested) return false
     await chestHelpers.takeLoadoutFromChest()
+    if (stopRequested) return false
     await withdrawNamedItemsFromBase(['stick'], 4)
     await withdrawNamedItemsFromBase(SWORD_MATERIAL_ITEMS, 2)
     await toolHelpers.equipArmor()
     await toolHelpers.equipShield()
   }
 
-  if (!toolHelpers.findBestSword()) {
+  if (stopRequested) return false
+
+  if (!toolHelpers.findBestSword() && options.allowCraft !== false) {
     await craftBestSword()
   }
 
+  if (stopRequested) return false
   const equipped = await toolHelpers.equipWeapon()
   return equipped
 }
@@ -1252,13 +1485,63 @@ function inventoryCount(itemName) {
     .reduce((total, item) => total + item.count, 0)
 }
 
-async function safeGoBase(options = {}) {
-  if (!basePos) {
-    safeChat("Base non definie. Dis 'setbase' pres de ton coffre.", 5000)
+function currentGameMode() {
+  if (!bot.game) return null
+  return bot.game.gameMode ?? bot.game.gamemode ?? bot.game.gameModeName ?? null
+}
+
+function isCreativeGameMode() {
+  const gameMode = currentGameMode()
+  if (gameMode === null || gameMode === undefined) return false
+  const normalized = String(gameMode).toLowerCase()
+  return normalized === 'creative' || normalized === '1'
+}
+
+function warnIfCreativeGameMode() {
+  if (!isCreativeGameMode()) return false
+  const now = Date.now()
+  if (now - lastCreativeWarningAt > 60000) {
+    lastCreativeWarningAt = now
+    safeChat('⚠️ Le bot est en créatif. Mets-le en survie pour tester correctement.', 15000)
+    logTag('survival', `warning creative gamemode (${currentGameMode()})`)
+  }
+  return true
+}
+
+async function equipAxeForWoodLog() {
+  const axeAvailable = bot.inventory.items().some(item => item.name.includes('axe') && remainingDurability(item) > 3)
+  const equipped = await toolHelpers.equipBestToolByNamePart('axe')
+  if (equipped && bot.heldItem && bot.heldItem.name.includes('axe')) return true
+
+  if (axeAvailable) {
+    logTag('wood', 'hache disponible mais equip impossible, log ignore')
     return false
   }
 
+  if (!woodNoAxeWarned) {
+    woodNoAxeWarned = true
+    safeChat('⚠️ Aucune hache disponible, collecte ralentie.', 15000)
+  }
+
+  if (bot.heldItem) {
+    try {
+      await bot.unequip('hand')
+    } catch {}
+  }
+
+  return true
+}
+
+async function safeGoBase(options = {}) {
+  warnIfCreativeGameMode()
   const ignoreStop = options.ignoreStop === true
+  if (stopRequested && !ignoreStop) return false
+
+  if (!basePos) {
+    safeChat("Base non définie. Place-moi à la base puis dis setbase.", 5000)
+    return false
+  }
+
   if (portalHelpers.isNether()) {
     console.log('[portal] retour base depuis nether')
     const returned = await portalHelpers.ensureOverworld()
@@ -1286,6 +1569,24 @@ async function safeGoBase(options = {}) {
   console.log(options.force ? '[base] retour force' : '[base] retour')
   await doorHelpers.openNearbyDoors(6, { quiet: true })
 
+  if (shouldUseLongRangeBaseReturn()) {
+    const longRangeReady = await safeGoBaseLongRange({ ignoreStop })
+    if (isInsideBase(8)) {
+      console.log('[base] interieur atteint')
+      lastBasePathFailureAt = 0
+      return true
+    }
+
+    if (!longRangeReady && horizontalDistanceToBase() > 70) {
+      lastBasePathFailureAt = Date.now()
+      console.log(`[base-return] base inaccessible after long-range plans distance=${Math.round(distanceToBase())}`)
+      if (!options.quiet) {
+        safeChat("Base inaccessible. Je n'ai pas trouve de retour progressif fiable.", 9000)
+      }
+      return false
+    }
+  }
+
   const targets = baseTravelTargets()
   const plans = [
     { canDig: false, label: 'chemin normal' },
@@ -1304,7 +1605,7 @@ async function safeGoBase(options = {}) {
         timeoutMs: plan.canDig ? 11000 : 9000,
         canDig: plan.canDig,
         ignoreStop,
-        quiet: options.quiet === true || i > 0
+        quiet: true
       })
 
       await doorHelpers.openNearbyDoors(6, { quiet: true })
@@ -1323,7 +1624,7 @@ async function safeGoBase(options = {}) {
     timeoutMs: 12000,
     canDig: false,
     ignoreStop,
-    quiet: options.quiet === true,
+    quiet: true,
     successCheck: () => isInsideBase(8)
   })
 
@@ -1353,11 +1654,20 @@ async function returnBase(options = {}) {
   bot.clearControlStates()
 
   safeChat('🏠 Retour à la base.')
-  const arrived = await safeGoBase({ force: true, ignoreStop: true })
-  let stored = true
-  if (arrived && deposit) stored = await chestHelpers.storeItems()
-  if (arrived && stored) safeChat('🏠 Base atteinte.')
-  if (arrived && !stored) safeChat('🏠 Base atteinte. Dépôt incomplet.')
+  const arrived = await safeGoBase({ force: true, ignoreStop: true, quiet: true })
+  if (!arrived) {
+    safeChat('⚠️ Base inaccessible.')
+    return false
+  }
+
+  if (deposit) {
+    const stored = await chestHelpers.storeItems({ baseOnly: true, details: true, quiet: true })
+    if (!stored.ok && stored.depositedCount === 0 && stored.startingCount > 0) {
+      console.log('[base] coffre inaccessible ou depot impossible pendant retour base')
+    }
+  }
+
+  safeChat('🏠 Base atteinte.')
   return arrived
 }
 
@@ -1365,11 +1675,43 @@ async function prepareMission(options = {}) {
   const visitBase = options.visitBase === true
   const missionType = options.missionType || null
   const quiet = options.quiet === true
+  const withDetails = options.details === true
+  const loadoutReport = { withdrawn: [], count: 0 }
+  let loadoutTaken = false
   let needsBase = visitBase
+
+  function finishPrepare(ok, reason = null) {
+    if (!withDetails) return ok
+    return {
+      ok,
+      reason,
+      loadoutTaken,
+      loadoutReport
+    }
+  }
+
+  function mergeLoadoutResult(result) {
+    if (!result || !result.ok) return
+    loadoutTaken = true
+    loadoutReport.count += result.count || 0
+    for (const entry of result.withdrawn || []) {
+      const existing = loadoutReport.withdrawn.find(item => item.name === entry.name)
+      if (existing) existing.count += entry.count
+      else loadoutReport.withdrawn.push({ name: entry.name, count: entry.count })
+    }
+  }
+
+  async function takeBaseLoadout() {
+    const result = await chestHelpers.takeLoadoutFromChest({ baseOnly: true, details: true })
+    mergeLoadoutResult(result)
+    return result
+  }
+
+  warnIfCreativeGameMode()
 
   if (!needsBase && basePos) {
     if (bot.food <= CONFIG.foodCriticalAt && foodHelpers.foodCount() === 0) needsBase = true
-    if ((missionType === 'mine' || missionType === 'hunt') && foodHelpers.foodCount() < Math.min(4, CONFIG.foodCarry)) needsBase = true
+    if ((missionType === 'mine' || missionType === 'collect' || missionType === 'hunt') && foodHelpers.foodCount() < Math.min(4, CONFIG.foodCarry)) needsBase = true
     if (missionType === 'mine' && !toolHelpers.hasUsablePickaxe()) needsBase = true
     if (missionType === 'hunt' && !toolHelpers.hasUsableWeapon()) needsBase = true
   }
@@ -1381,9 +1723,9 @@ async function prepareMission(options = {}) {
     if (!reached) {
       safeChat("Preparation impossible: je n'arrive pas a rejoindre la base.", 8000)
       stopRequested = true
-      return false
+      return finishPrepare(false, 'base_inaccessible')
     }
-    await chestHelpers.takeLoadoutFromChest()
+    await takeBaseLoadout()
   }
 
   await toolHelpers.equipArmor()
@@ -1393,7 +1735,7 @@ async function prepareMission(options = {}) {
   }
 
   if (!foodHelpers.findBestFood() && basePos && needsBase) {
-    await chestHelpers.takeLoadoutFromChest()
+    await takeBaseLoadout()
   }
 
   if (missionType === 'mine' && !toolHelpers.hasUsablePickaxe()) {
@@ -1402,7 +1744,7 @@ async function prepareMission(options = {}) {
       const ready = await ensureDiamondPickaxeForAncientDebris()
       if (!ready) {
         stopRequested = true
-        return false
+        return finishPrepare(false, 'outil_manquant')
       }
     } else if (target && target.key === 'diamond') {
       await ensureIronPickaxe()
@@ -1418,7 +1760,7 @@ async function prepareMission(options = {}) {
     const ready = await ensureDiamondPickaxeForAncientDebris()
     if (!ready) {
       stopRequested = true
-      return false
+      return finishPrepare(false, 'outil_manquant')
     }
   }
 
@@ -1427,7 +1769,7 @@ async function prepareMission(options = {}) {
   }
 
   if (!quiet) safeChat('✅ Prêt.')
-  return true
+  return finishPrepare(true)
 }
 
 function countItems(names) {
@@ -1442,25 +1784,37 @@ function chatResourceLabel(target) {
     ancient_debris: 'Ancient debris',
     coal: 'Charbon',
     cobblestone: 'Pierre',
+    copper: 'Cuivre',
     diamond: 'Diamant',
+    dirt: 'Terre',
+    emerald: 'Émeraude',
     gold: 'Or',
     iron: 'Fer',
     lapis: 'Lapis',
     nether_gold: 'Or du Nether',
+    netherrack: 'Netherrack',
     quartz: 'Quartz',
     redstone: 'Redstone',
+    sand: 'Sable',
     wood: 'Bois'
   }
   return labels[target.key] || target.label || target.key
 }
 
 function isCollectionTarget(target) {
-  return target && (target.key === 'wood' || target.key === 'cobblestone')
+  return target && (target.kind === 'material' || target.key === 'wood' || target.key === 'cobblestone')
+}
+
+function isNetherTarget(target) {
+  return Boolean(target && target.dimension === 'nether')
 }
 
 function resourceProgressIcon(target) {
   if (target.key === 'wood') return '🪓'
   if (target.key === 'cobblestone') return '🪨'
+  if (target.key === 'sand') return '🏖️'
+  if (target.key === 'dirt') return '🟫'
+  if (target.key === 'netherrack') return '🔥'
   return '⛏️'
 }
 
@@ -1469,6 +1823,7 @@ function reportResourceProgress(mission, target, options = {}) {
   const amount = Math.max(1, mission.amount || 1)
   const progress = Math.min(mission.progress || 0, amount)
   const bucket = progressBucket(progress, amount)
+  if (!options.force && progress < amount && bucket === 0) return
   if (!options.force && bucket <= (mission.chatProgressBucket ?? -1) && progress < amount) return
 
   mission.chatProgressBucket = bucket
@@ -1477,6 +1832,12 @@ function reportResourceProgress(mission, target, options = {}) {
 
 function announceResourceMissionStart(target, amount) {
   const label = chatResourceLabel(target)
+  if (target && target.dimension === 'nether') {
+    safeChat(`🔥 Mission Nether acceptée : ${label} x${amount}.`)
+    safeChat('Je passe par le portail, puis retour base après dépôt.')
+    return
+  }
+
   if (isCollectionTarget(target)) {
     safeChat('🌲 Collecte lancée.')
     safeChat(`🎯 Matériau cible : ${label} x${amount}.`)
@@ -1506,6 +1867,7 @@ function reportHuntProgress(mission, options = {}) {
   const amount = Math.max(1, mission.amount || 1)
   const progress = Math.min(mission.progress || 0, amount)
   const bucket = progressBucket(progress, amount)
+  if (!options.force && progress < amount && bucket === 0) return
   if (!options.force && bucket <= (mission.chatProgressBucket ?? -1) && progress < amount) return
 
   mission.chatProgressBucket = bucket
@@ -1691,6 +2053,41 @@ function isLogBlockName(name) {
   return Boolean(name && (name.endsWith('_log') || name.endsWith('_wood') || name === 'mushroom_stem'))
 }
 
+function isLeafBlockName(name) {
+  return Boolean(name && (name.endsWith('_leaves') || name === 'azalea_leaves' || name === 'flowering_azalea_leaves'))
+}
+
+function hasNearbyLeaves(pos, radius = 3) {
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dy = 0; dy <= radius; dy++) {
+      for (let dz = -radius; dz <= radius; dz++) {
+        const block = bot.blockAt(pos.offset(dx, dy, dz))
+        if (isLeafBlockName(block && block.name)) return true
+      }
+    }
+  }
+
+  return false
+}
+
+function woodProtectedReason(block) {
+  const reason = protectedZoneReason(block.position)
+  if (!reason) return null
+
+  // V2: on protege toujours le coeur de base, mais on autorise les vrais arbres
+  // naturels autour de la base pour que "collect bois" ne soit pas aveugle.
+  if (
+    reason === 'base' &&
+    basePos &&
+    block.position.distanceTo(basePos) > 14 &&
+    hasNearbyLeaves(block.position)
+  ) {
+    return null
+  }
+
+  return reason
+}
+
 function canHarvest(block) {
   if (!block || typeof block.canHarvest !== 'function') return true
 
@@ -1720,6 +2117,68 @@ function isStableFloor(block) {
   return block.boundingBox === 'block'
 }
 
+function isWaterLikeBlock(block) {
+  if (!block || !block.name) return false
+  return block.name === 'water' || block.name.includes('kelp') || block.name.includes('seagrass')
+}
+
+function isLavaLikeBlock(block) {
+  if (!block || !block.name) return false
+  return block.name === 'lava' || block.name === 'flowing_lava' || block.name === 'fire' || block.name === 'soul_fire'
+}
+
+function lavaRiskNear(pos) {
+  if (!isValidPos(pos)) return null
+
+  const offsets = [
+    [0, 1, 0],
+    [0, 2, 0],
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 0, 1],
+    [0, 0, -1],
+    [1, 1, 0],
+    [-1, 1, 0],
+    [0, 1, 1],
+    [0, 1, -1]
+  ]
+
+  for (const [dx, dy, dz] of offsets) {
+    const block = bot.blockAt(pos.offset(dx, dy, dz))
+    if (isLavaLikeBlock(block)) return block
+  }
+
+  return null
+}
+
+function isSafeToBreakWithoutLavaSurprise(block) {
+  if (!block || !block.position) return false
+  const risk = lavaRiskNear(block.position)
+  if (!risk) return true
+
+  const key = `${block.position.x},${block.position.y},${block.position.z}`
+  const now = Date.now()
+  if (!lavaRiskLogAt.has(key) || now - lavaRiskLogAt.get(key) > 15000) {
+    lavaRiskLogAt.set(key, now)
+    logTag('nether', `bloc ignore: lave proche ${block.name} ${block.position.x} ${block.position.y} ${block.position.z}`)
+  }
+  return false
+}
+
+function isSafeStandingColumn(pos) {
+  if (!isValidPos(pos)) return false
+
+  const floor = bot.blockAt(pos.offset(0, -1, 0))
+  const feet = bot.blockAt(pos)
+  const head = bot.blockAt(pos.offset(0, 1, 0))
+
+  if (!isStableFloor(floor)) return false
+  if (isLavaLikeBlock(feet) || isLavaLikeBlock(head)) return false
+  if (lavaRiskNear(pos) || lavaRiskNear(pos.offset(0, 1, 0))) return false
+
+  return true
+}
+
 function canBreakForPath(block) {
   if (!block || !block.name) return false
   if (!block.diggable) return false
@@ -1730,6 +2189,7 @@ function canBreakForPath(block) {
 
   const above = bot.blockAt(block.position.offset(0, 1, 0))
   if (above && ['lava', 'water'].includes(above.name)) return false
+  if (!isSafeToBreakWithoutLavaSurprise(block)) return false
 
   return true
 }
@@ -1812,6 +2272,7 @@ async function digBlockSafely(block, label = 'bloc') {
   if (!canBreakForPath(block)) return false
   if (!block.diggable) return false
   if (dangerHelpers.blockIsHazard(block)) return false
+  if (!isSafeToBreakWithoutLavaSurprise(block)) return false
 
   const protectedReason = protectedZoneReason(block.position)
   if (protectedReason) {
@@ -1926,6 +2387,10 @@ async function digStairStepUp(direction, label = 'montee mine') {
 
   if (!await digBlockSafely(head, label)) return false
   if (!await digBlockSafely(feet, label)) return false
+  if (!isSafeStandingColumn(feetPos)) {
+    logTag('danger', `${label}: passage refuse lave proche ${feetPos}`)
+    return false
+  }
 
   return moveIntoMinedStep(feetPos, label)
 }
@@ -2094,6 +2559,51 @@ async function stripMineStep(target, strategy) {
   return Boolean(findTargetBlock(target, { maxDistance: strategy.scanRadius, count: 48 }))
 }
 
+async function netherResourceExploreStep(target, attempt, strategy) {
+  const visible = findTargetBlock(target, { maxDistance: strategy.scanRadius, count: 48 })
+  if (visible) return true
+
+  const current = bot.entity.position
+  const offset = explorationOffset(attempt, strategy.exploreStep)
+  const targetX = current.x + offset.x
+  const targetZ = current.z + offset.z
+  const goal = goals.GoalNearXZ
+    ? new goals.GoalNearXZ(targetX, targetZ, 5)
+    : new goals.GoalNear(targetX, current.y, targetZ, 5)
+
+  logTag('nether', `scan ${target.key} step=${attempt} -> ${Math.round(targetX)} ${Math.round(targetZ)}`)
+
+  const reached = await safeGoto(goal, `scan nether ${target.label}`, {
+    attempts: 1,
+    timeoutMs: 7000,
+    canDig: true,
+    canPlace: false,
+    safeToBreak: canBreakForPath,
+    quiet: true,
+    successCheck: () => Boolean(findTargetBlock(target, { maxDistance: Math.min(strategy.scanRadius, 48), count: 24 }))
+  })
+
+  if (reached || findTargetBlock(target, { maxDistance: Math.min(strategy.scanRadius, 48), count: 24 })) return true
+  if (stopRequested) return false
+
+  const directions = alternateDirections(miningDirectionVector())
+  const direction = directions[attempt % directions.length]
+  const tunnelSteps = strategy.mode === 'nether_material' ? 2 : 4
+
+  for (let i = 0; i < tunnelSteps && !stopRequested; i++) {
+    const safe = await dangerHelpers.ensureSurvival({ allowReturn: true })
+    if (!safe) return false
+
+    const moved = await digForwardTunnelStep(direction, `explore nether ${target.label}`)
+    if (!moved) return false
+
+    await collectNearbyDrops(4)
+    if (findTargetBlock(target, { maxDistance: Math.min(strategy.scanRadius, 48), count: 24 })) return true
+  }
+
+  return false
+}
+
 async function exploreForResource(target, attempt, strategy) {
   logTag('scan', `no visible ${target.key}, cycle=${attempt}, mode=${strategy.mode}`)
 
@@ -2101,6 +2611,10 @@ async function exploreForResource(target, attempt, strategy) {
     const descended = await descendForMining(strategy)
     if (!descended) return false
     return stripMineStep(target, strategy)
+  }
+
+  if (isNetherTarget(target) || strategy.dimension === 'nether') {
+    return netherResourceExploreStep(target, attempt, strategy)
   }
 
   if (strategy.mode === 'short_tunnel' && bot.entity.position.y < 70) {
@@ -2119,8 +2633,9 @@ async function exploreForResource(target, attempt, strategy) {
 
   const reached = await safeGoto(goal, `scan ${target.label}`, {
     attempts: 1,
-    timeoutMs: isWoodTarget(target) ? 9000 : 8000,
+    timeoutMs: isWoodTarget(target) ? 6500 : 8000,
     canDig: false,
+    avoidWater: isWoodTarget(target),
     quiet: true,
     successCheck: () => Boolean(findTargetBlock(target, { maxDistance: Math.min(strategy.scanRadius, 48), count: 24 }))
   })
@@ -2132,7 +2647,7 @@ async function exploreForResource(target, attempt, strategy) {
 
 function isReachableWoodCandidate(block) {
   if (!block || !isLogBlockName(block.name)) return false
-  if (isProtectedBreakPosition(block.position)) return false
+  if (woodProtectedReason(block)) return false
 
   const below = bot.blockAt(block.position.offset(0, -1, 0))
   if (!below || dangerHelpers.blockIsHazard(below)) return false
@@ -2156,39 +2671,96 @@ function isReachableWoodCandidate(block) {
   return nearbyWalkable
 }
 
+function nearbyWaterPenalty(position, radius = 2) {
+  let penalty = 0
+
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dz = -radius; dz <= radius; dz++) {
+      for (const dy of [-1, 0]) {
+        const block = bot.blockAt(position.offset(dx, dy, dz))
+        if (isWaterLikeBlock(block)) penalty += 8
+      }
+    }
+  }
+
+  return penalty
+}
+
+function woodCandidateScore(block) {
+  const botDistance = block.position.distanceTo(bot.entity.position)
+  const baseDistance = basePos ? block.position.distanceTo(basePos) : 0
+  const heightPenalty = Math.max(0, Math.abs(block.position.y - bot.entity.position.y) - 2) * 3
+  const waterPenalty = nearbyWaterPenalty(block.position, 2)
+  const farFromBasePenalty = basePos ? Math.max(0, baseDistance - Math.max(CONFIG.baseProtectionRadius + 48, 64)) : 0
+
+  return botDistance + heightPenalty + waterPenalty + farFromBasePenalty
+}
+
 function findWoodCandidates(target, maxDistance) {
   const ids = getBlockIds(target.blocks)
   if (ids.length === 0) return []
+  const seen = new Set()
+  const candidates = []
+  const searchPoints = [bot.entity.position]
 
-  const positions = bot.findBlocks({
-    matching: ids,
-    maxDistance,
-    count: 48
-  })
+  if (basePos && basePos.distanceTo(bot.entity.position) > 2) {
+    searchPoints.push(basePos)
+  }
 
-  return positions
-    .map(position => bot.blockAt(position))
+  const radii = [16, 32, 48, 64].filter(radius => radius <= Math.max(16, maxDistance))
+  if (radii.length === 0) radii.push(Math.min(16, maxDistance))
+
+  for (const point of searchPoints) {
+    for (const radius of radii) {
+      const positions = bot.findBlocks({
+        point,
+        matching: ids,
+        maxDistance: radius,
+        count: 96
+      })
+
+      for (const position of positions) {
+        const key = `${position.x},${position.y},${position.z}`
+        if (seen.has(key)) continue
+        seen.add(key)
+
+        const block = bot.blockAt(position)
+        if (block) candidates.push(block)
+      }
+
+      if (point === bot.entity.position && candidates.some(isReachableWoodCandidate)) break
+    }
+  }
+
+  return candidates
     .filter(isReachableWoodCandidate)
-    .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))
+    .sort((a, b) => {
+      const distanceDiff = a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position)
+      if (Math.abs(distanceDiff) > 6) return distanceDiff
+      return woodCandidateScore(a) - woodCandidateScore(b)
+    })
 }
 
 async function findReachableWoodBlock(target, strategy) {
-  const candidates = findWoodCandidates(target, strategy.scanRadius || CONFIG.mineSearchRadius)
+  const candidates = findWoodCandidates(target, strategy.scanRadius || CONFIG.mineSearchRadius).slice(0, 18)
 
   for (const block of candidates) {
+    if (stopRequested) return null
     console.log(`[wood] arbre candidat ${block.name} ${block.position.x} ${block.position.y} ${block.position.z}`)
     const reached = await safeGoto(
       new goals.GoalLookAtBlock(block.position, bot.world, { reach: 4.5 }),
       'arbre',
       {
         attempts: 1,
-        timeoutMs: 7000,
+        timeoutMs: 3500,
         canDig: false,
+        avoidWater: true,
         quiet: true,
         successCheck: () => bot.entity.position.distanceTo(block.position) <= 5 && bot.canDigBlock(bot.blockAt(block.position) || block)
       }
     )
 
+    if (stopRequested) return null
     const fresh = bot.blockAt(block.position)
     if (reached && fresh && target.blocks.includes(fresh.name) && bot.canDigBlock(fresh)) return fresh
 
@@ -2213,7 +2785,7 @@ function adjacentTreeLogs(origin, target, radius = 4) {
     const block = bot.blockAt(pos)
     if (!block || !target.blocks.includes(block.name)) continue
     if (block.position.distanceTo(origin.position) > radius) continue
-    if (isProtectedBreakPosition(block.position)) continue
+    if (woodProtectedReason(block)) continue
 
     logs.push(block)
 
@@ -2241,14 +2813,21 @@ async function harvestWoodTree(startBlock, target, neededCount) {
     const reached = await safeGoto(
       new goals.GoalLookAtBlock(fresh.position, bot.world, { reach: 4.5 }),
       'tronc',
-      { attempts: 1, timeoutMs: 5000, canDig: false, quiet: true }
+      { attempts: 1, timeoutMs: 3500, canDig: false, quiet: true }
     )
+    if (stopRequested) break
     if (!reached || !bot.canDigBlock(fresh)) {
       console.log(`[wood] path impossible ${fresh.position.x} ${fresh.position.y} ${fresh.position.z}`)
       continue
     }
 
     try {
+      const axeReady = await equipAxeForWoodLog()
+      if (!axeReady) {
+        console.log(`[wood] path impossible ${fresh.position.x} ${fresh.position.y} ${fresh.position.z}`)
+        continue
+      }
+      if (stopRequested) break
       await bot.dig(fresh, true)
       console.log(`[wood] log cassé ${fresh.name} ${fresh.position.x} ${fresh.position.y} ${fresh.position.z}`)
       await collectNearbyDrops(6)
@@ -2415,13 +2994,14 @@ async function explore(radius = CONFIG.exploreRadius) {
 async function mine(target, amount, options = {}) {
   const mission = options.resume && currentMission
     ? currentMission
-    : missionRuntime.createMission('mine', { targetKey: target.key, amount })
+    : missionRuntime.createMission(isCollectionTarget(target) ? 'collect' : 'mine', { targetKey: target.key, amount })
 
   target = resourceTargetByKey(mission.targetKey) || target
 
   missionActive = true
   stopRequested = false
   missionRuntime.setMissionStatus('running')
+  warnIfCreativeGameMode()
   let searchFails = 0
   let minedTunnelCycles = 0
   const strategy = miningStrategyFor(target, CONFIG)
@@ -2436,13 +3016,23 @@ async function mine(target, amount, options = {}) {
   logTag('mine', `start target=${target.key} amount=${mission.amount} mode=${strategy.mode}`)
 
   if (target.dimension === 'nether' || strategy.dimension === 'nether') {
+    if (!basePos) {
+      missionRuntime.pauseMission('Nether: base non définie. Fais setbase avant de partir.')
+      return
+    }
+
     const reachedNether = await portalHelpers.ensureNether()
     if (!reachedNether) {
       missionRuntime.pauseMission('Minage Nether en pause: portail Nether introuvable ou impossible a utiliser.')
       return
     }
 
-    await portalHelpers.moveAwayFromCurrentPortal(22)
+    const awayFromPortal = await portalHelpers.moveAwayFromCurrentPortal(22)
+    if (!awayFromPortal) {
+      logTag('nether', 'sortie portail difficile, scan local prudent')
+      await sleep(800)
+      await portalHelpers.moveAwayFromCurrentPortal(10)
+    }
   } else {
     const awayFromBase = await moveAwayFromBaseForMining()
     if (!awayFromBase) {
@@ -2461,11 +3051,26 @@ async function mine(target, amount, options = {}) {
 
     if (bot.inventory.emptySlotCount() <= CONFIG.minEmptySlots) {
       if (!basePos) {
-        missionRuntime.pauseMission("Inventaire presque plein et base non definie. Dis 'setbase' puis 'reprendre'.")
+        missionRuntime.pauseMission("Inventaire plein et base non définie. Fais setbase puis relance.")
         break
       }
 
-      await missionRuntime.depositForMission('Inventaire presque plein, depot puis reprise.')
+      const deposited = await missionRuntime.depositForMission('Inventaire presque plein, dépôt à la base.')
+      if (!deposited || stopRequested || !missionActive) break
+
+      if (isNetherTarget(target) || strategy.dimension === 'nether') {
+        const backToNether = await portalHelpers.ensureNether()
+        if (!backToNether) {
+          missionRuntime.pauseMission('Retour Nether impossible après dépôt. Mission stoppée proprement.')
+          break
+        }
+        const awayFromPortal = await portalHelpers.moveAwayFromCurrentPortal(22)
+        if (!awayFromPortal) {
+          logTag('nether', 'sortie portail difficile apres depot')
+          await sleep(800)
+          await portalHelpers.moveAwayFromCurrentPortal(10)
+        }
+      }
       continue
     }
 
@@ -2482,7 +3087,10 @@ async function mine(target, amount, options = {}) {
         logTag('scan', `recherche ${target.key}: ${progressText}`)
       }
       if (searchFails >= strategy.maxScanCycles) {
-        missionRuntime.pauseMission(`Je ne trouve pas ${target.label} apres une recherche progressive. Cause probable: chunks non charges, zone trop dangereuse ou ressource trop rare.`)
+        const reason = isWoodTarget(target)
+          ? '⚠️ Aucun arbre accessible trouvé proche de moi.'
+          : `Je ne trouve pas ${target.label} apres une recherche progressive. Cause probable: chunks non charges, zone trop dangereuse ou ressource trop rare.`
+        missionRuntime.pauseMission(reason)
         break
       }
       const progressed = await exploreForResource(target, searchFails, strategy)
@@ -2499,9 +3107,19 @@ async function mine(target, amount, options = {}) {
       const reached = await safeGoto(
         new goals.GoalLookAtBlock(block.position, bot.world, { reach: 4.5 }),
         `${target.label}`,
-        { attempts: 2, canDig: true, safeToBreak: canBreakForPath }
+        {
+          attempts: isWoodTarget(target) ? 1 : 2,
+          canDig: !isWoodTarget(target),
+          avoidWater: isWoodTarget(target),
+          quiet: isWoodTarget(target),
+          safeToBreak: canBreakForPath
+        }
       )
       if (!reached) {
+        if (isWoodTarget(target)) {
+          searchFails++
+          continue
+        }
         const tunneled = await digTowardPosition(block.position, `tunnel ${target.label}`, {
           range: 4,
           maxSteps: target.dimension === 'nether' ? 56 : 36,
@@ -2520,7 +3138,7 @@ async function mine(target, amount, options = {}) {
 
       const freshBlock = bot.blockAt(block.position)
       if (!freshBlock || !target.blocks.includes(freshBlock.name)) continue
-      const protectedReason = protectedZoneReason(freshBlock.position)
+      const protectedReason = isWoodTarget(target) ? woodProtectedReason(freshBlock) : protectedZoneReason(freshBlock.position)
       if (protectedReason) {
         safeChat(`Bloc ignore: zone protegee (${protectedReason}).`, 10000)
         continue
@@ -2536,12 +3154,12 @@ async function mine(target, amount, options = {}) {
         if (basePos) {
           const reachedBase = await safeGoBase({ force: true, ignoreStop: true })
           if (!reachedBase) {
-            missionRuntime.pauseMission("Outil manquant et base inaccessible. Rapproche-moi de la base ou donne-moi une pioche puis reprendre.")
+            missionRuntime.pauseMission("Outil manquant et base inaccessible. Donne-moi l'outil puis relance.")
             break
           }
           await chestHelpers.takeLoadoutFromChest()
         } else {
-          missionRuntime.pauseMission("Outil manquant: donne-moi une pioche ou du bois, ou fais setbase puis reprendre.")
+          missionRuntime.pauseMission("Outil manquant. Donne-moi une pioche ou fais setbase puis relance.")
           break
         }
         continue
@@ -2550,6 +3168,10 @@ async function mine(target, amount, options = {}) {
       if (isWoodTarget(target)) {
         await harvestWoodTree(freshBlock, target, Math.max(1, mission.amount - mission.progress))
       } else {
+        if (!canBreakForPath(freshBlock)) {
+          searchFails++
+          continue
+        }
         await bot.dig(freshBlock, true)
         await collectNearbyDrops(6)
         await sleep(300)
@@ -2580,7 +3202,6 @@ async function mine(target, amount, options = {}) {
 
   if (currentMission === mission && !stopRequested && mission.progress >= mission.amount) {
     reportResourceProgress(mission, target, { force: true })
-    announceResourceMissionComplete(mission, target)
     await missionRuntime.finalizeMissionWithBaseDeposit(mission, isCollectionTarget(target) ? 'Collecte terminee.' : 'Minage termine.')
   }
 }
@@ -2617,11 +3238,11 @@ async function hunt(amount, options = {}) {
 
     if (bot.inventory.emptySlotCount() <= CONFIG.minEmptySlots) {
       if (!basePos) {
-        missionRuntime.pauseMission("Inventaire presque plein et base non definie. Dis 'setbase' puis 'reprendre'.")
+        missionRuntime.pauseMission("Inventaire plein et base non définie. Fais setbase puis relance.")
         break
       }
 
-      await missionRuntime.depositForMission('Inventaire presque plein, depot puis reprise.')
+      await missionRuntime.depositForMission('Inventaire presque plein, dépôt à la base.')
       continue
     }
 
@@ -2629,7 +3250,7 @@ async function hunt(amount, options = {}) {
     if (!animal) {
       searchFails++
       if (searchFails >= 8) {
-        missionRuntime.pauseMission('Je ne trouve plus assez d animaux proches. Rapproche-moi d une zone avec animaux puis dis reprendre.')
+        missionRuntime.pauseMission("Je ne trouve plus assez d'animaux proches. Rapproche-moi puis relance.")
         break
       }
       await explore()
@@ -4071,7 +4692,8 @@ const commandContext = createCommandContextFactory({
   state: {
     getStopRequested: () => stopRequested, setStopRequested: value => { stopRequested = value },
     setMissionActive: value => { missionActive = value }, setCurrentMission: mission => { currentMission = mission },
-    setCommandRunning: value => { commandRunning = value }, setDefendMode: value => { defendMode = value },
+    setCommandRunning: value => { commandRunning = value }, setCombatRunning: value => { combatRunning = value },
+    setSafetyRunning: value => { safetyRunning = value }, setDefendMode: value => { defendMode = value },
     setBasePos: value => { basePos = value }, setBaseContainerPos: value => { baseContainerPos = value },
     setNetherPortals: value => { netherPortals = value || { overworld: null, nether: null } },
     setBuildSite: value => { buildSite = value }, incrementCommandRunId: () => { runExclusive.cancel() },
@@ -4116,6 +4738,7 @@ bot.on('spawn', () => {
   runtimeMemory.loadMemory()
   installFarmBlockProtectionGuard()
   configureMovements()
+  warnIfCreativeGameMode()
 
   if (baseContainerPos && bot.tool && bot.tool.chestLocations) {
     bot.tool.chestLocations.length = 0
@@ -4126,11 +4749,12 @@ bot.on('spawn', () => {
     startupAnnounced = true
     safeChat('Bonjour, je suis Aiko, ton assistant survival.')
     safeChat("Je n'ecoute que les owners configures.")
+    safeChat('Commandes bot: écris dans le chat sans slash. Exemple: stop, pas /stop.')
     safeChat("Essaie: status, setbase, prepare, mine 16 fer, retour base.")
     safeChat("La liste complete est dans l'app: Commandes. Feature incoming = en developpement.")
   }
   if (currentMission) {
-    safeChat(`Mission en pause chargee. Dis reprendre. ${missionRuntime.missionProgressText()}`)
+    safeChat(`Mission sauvegardée: ${missionRuntime.missionProgressText()}`)
   }
 })
 

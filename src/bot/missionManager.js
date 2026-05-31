@@ -7,6 +7,11 @@ function createMissionText({ resourceTargetByKey }) {
       return target ? `minage ${target.label}` : 'minage'
     }
 
+    if (mission.type === 'collect') {
+      const target = resourceTargetByKey(mission.targetKey)
+      return target ? `collecte ${target.label}` : 'collecte'
+    }
+
     if (mission.type === 'hunt') return 'chasse'
     if (mission.type === 'farmAnimals') return 'ferme animaux'
     if (mission.type === 'farmSugarCane') return 'ferme canne a sucre'
@@ -21,9 +26,9 @@ function createMissionText({ resourceTargetByKey }) {
     const amount = Math.max(0, mission.amount || 0)
     const progress = Math.min(mission.progress || 0, amount)
     const remaining = Math.max(0, amount - progress)
-    const deposited = mission.type === 'mine' ? ` | depose ${mission.deposited || 0}` : ''
+    const deposited = (mission.type === 'mine' || mission.type === 'collect') ? ` | dépôt ${mission.deposited || 0}` : ''
 
-    return `Mission ${missionLabel(mission)}: ${progress}/${amount}, reste ${remaining}${deposited}, trajets ${mission.trips || 0}, priorite ${mission.priority || 0}, statut ${mission.status}.`
+    return `🎯 ${missionLabel(mission)} : ${progress}/${amount}, reste ${remaining}${deposited}.`
   }
 
   return {

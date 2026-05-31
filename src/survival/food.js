@@ -1,5 +1,6 @@
 function createFoodHelpers(deps) {
   let isEating = false
+  let lastNoFoodWarningAt = 0
 
   function isFood(item) {
     return Boolean(item && deps.foodNames.has(item.name))
@@ -24,16 +25,22 @@ function createFoodHelpers(deps) {
 
   async function autoEat(force = false) {
     if (isEating) return false
+    if (deps.bot.food >= 20) return true
     if (!force && deps.bot.food >= deps.config.foodEatAt) return true
 
     const food = findBestFood()
     if (!food) {
-      deps.safeChat("J'ai faim mais je n'ai pas de nourriture.", 10000)
+      const now = Date.now()
+      if (now - lastNoFoodWarningAt > 15000) {
+        deps.safeChat("J'ai faim mais je n'ai pas de nourriture.", 10000)
+        lastNoFoodWarningAt = now
+      }
       return false
     }
 
     isEating = true
     try {
+      console.log(`[survival][food] eat ${food.name} hunger=${deps.bot.food}/20`)
       await deps.bot.equip(food, 'hand')
       await deps.bot.consume()
       return true

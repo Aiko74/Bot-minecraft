@@ -1,5 +1,6 @@
 function createAutomationHelpers(deps) {
   let lastAutoFarmBusyLogAt = 0
+  let autoFarmDisabledLogged = false
 
   function isNightTime() {
     const timeOfDay = deps.bot.time && typeof deps.bot.time.timeOfDay === 'number'
@@ -142,44 +143,9 @@ function createAutomationHelpers(deps) {
   }
 
   async function maybeAutoFarmAnimals() {
-    const intervalDays = animalFarmIntervalDays()
-    if (intervalDays <= 0) return
-    if (deps.isAutoFarmRunning()) return
-    if (!deps.getFarmZones().animals) return
-
-    const day = minecraftDay()
-    if (day === null) return
-
-    const state = ensureAnimalFarmTimer(day, intervalDays)
-    if (day < state.nextAnimalFarmDay) return
-
-    const currentMission = deps.getCurrentMission()
-    if (hasActiveMission()) {
-      logAutoFarmBusy(currentMission)
-      return
-    }
-
-    deps.logTag('farm', `auto ferme animaux: jour ${day}, seuil ${state.nextAnimalFarmDay}`)
-    deps.setAutoFarmRunning(true)
-    try {
-      deps.safeChat(`Auto ferme animaux: jour ${day}, je m'en occupe.`, 12000)
-      await deps.runExclusive(async () => {
-        await deps.farmAnimals({ auto: true })
-      }, { name: 'farmAnimals' })
-
-      const afterMission = deps.getCurrentMission()
-      const farmStillActive = afterMission && afterMission.type === 'farmAnimals'
-      if (farmStillActive || deps.isMissionActive() || deps.isStopRequested()) {
-        deps.logTag('farm', 'auto ferme non validee: mission en pause ou interrompue')
-        return
-      }
-
-      advanceAnimalFarmTimerAfterSuccess(day, intervalDays)
-    } catch (err) {
-      if (deps.logError) deps.logError('auto farm animals error', err)
-      else deps.logTag('farm', `auto farm animals error ${err && err.message ? err.message : err}`)
-    } finally {
-      deps.setAutoFarmRunning(false)
+    if (!autoFarmDisabledLogged) {
+      autoFarmDisabledLogged = true
+      deps.logTag('farm', 'auto ferme animaux désactivée en V2')
     }
   }
 

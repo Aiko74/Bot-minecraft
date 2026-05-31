@@ -42,7 +42,6 @@ const HOSTILE_ENTITIES = new Set([
   'drowned',
   'elder_guardian',
   'ender_dragon',
-  'enderman',
   'endermite',
   'evoker',
   'ghast',
@@ -68,7 +67,12 @@ const HOSTILE_ENTITIES = new Set([
   'wither_skeleton',
   'zoglin',
   'zombie',
-  'zombie_villager',
+  'zombie_villager'
+])
+
+const NEUTRAL_ENTITIES = new Set([
+  'enderman',
+  'piglin',
   'zombified_piglin'
 ])
 
@@ -85,7 +89,8 @@ const UNFIGHTABLE_ENTITIES = new Set([
   'warden',
   'ender_dragon',
   'wither',
-  'ghast'
+  'ghast',
+  'piglin_brute'
 ])
 
 const BED_BLOCK_NAMES = [
@@ -182,6 +187,7 @@ module.exports = {
   HAZARD_BLOCK_NAMES,
   HOSTILE_ENTITIES,
   HUNT_TARGETS,
+  NEUTRAL_ENTITIES,
   RAW_TO_COOKED,
   SWORD_MATERIAL_ITEMS,
   SWORD_PRIORITY,

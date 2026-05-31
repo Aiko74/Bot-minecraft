@@ -218,7 +218,7 @@ function parseIntent(rawMessage) {
     return { type: 'defendOff' }
   }
 
-  if (message === 'range' || message === 'range tout' || message === 'trie inventaire') {
+  if (message === 'range' || message === 'range tout' || message === 'trie inventaire' || message === 'range le stuff') {
     return { type: 'sortStorage' }
   }
 
@@ -360,7 +360,6 @@ function parseIntent(rawMessage) {
   if (
     message.includes('depose') ||
     message.includes('depot') ||
-    message.includes('range le stuff') ||
     message.includes('depose tout')
   ) {
     return { type: 'deposit' }
@@ -391,13 +390,18 @@ function parseIntent(rawMessage) {
     return { type: 'hunt', amount: extractNumber(message) || 5 }
   }
 
-  for (const target of RESOURCE_TARGETS) {
-    if (target.aliases.some(alias => hasAlias(message, alias))) {
-      return {
-        type: 'mine',
-        target,
-        amount: extractNumber(message) || target.defaultAmount
-      }
+  const resourceMatch = RESOURCE_TARGETS
+    .flatMap(target => (target.aliases || [])
+      .filter(alias => hasAlias(message, alias))
+      .map(alias => ({ target, alias })))
+    .sort((a, b) => b.alias.length - a.alias.length)[0]
+
+  if (resourceMatch) {
+    const target = resourceMatch.target
+    return {
+      type: target.kind === 'material' ? 'collect' : 'mine',
+      target,
+      amount: extractNumber(message) || target.defaultAmount
     }
   }
 

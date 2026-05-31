@@ -1,6 +1,6 @@
 {
   "name": "minecraft-bot-assistant",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Bot Minecraft autonome pour assister une survie",
   "author": "Aiko74",
   "main": "desktop/main.js",
@@ -10,6 +10,7 @@
     "desktop:build": "vite build --config desktop/vite.config.js",
     "desktop": "npm run desktop:build && electron desktop/main.js",
     "desktop:dist": "npm run desktop:build && electron-builder --win nsis zip --x64",
+    "v2:exe": "npm run desktop:dist",
     "v1:exe": "npm run desktop:dist",
     "app": "npm run desktop",
     "v1:package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-v1.ps1",
@@ -38,7 +39,7 @@
   },
   "build": {
     "appId": "fr.aiko.minecraft.assistant",
-    "productName": "Aiko Assistant 2077",
+    "productName": "Aiko-Assistant-2077-V2",
     "directories": {
       "output": "release/electron"
     },
@@ -84,7 +85,7 @@
           ]
         }
       ],
-      "artifactName": "Aiko-Assistant-2077-${version}-${arch}.${ext}"
+      "artifactName": "Aiko-Assistant-2077-V2-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -92,7 +93,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Aiko Assistant 2077"
+      "shortcutName": "Aiko Assistant 2077 V2"
     }
   }
 }

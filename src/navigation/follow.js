@@ -8,18 +8,18 @@ function createFollowHelpers(deps) {
   async function comeToPlayer(username) {
     const player = playerEntity(username)
     if (!player) {
-      deps.safeChat("Je ne te vois pas. Rapproche-toi ou attends que le chunk soit charge.")
+      deps.safeChat("Je ne te vois pas. Rapproche-toi.")
       return false
     }
 
-    deps.safeChat(`J'arrive vers ${username}.`)
+    deps.safeChat("J'arrive.")
     return deps.safeGoto(new deps.goals.GoalFollow(player, 2), `joueur ${username}`, {
       attempts: 2,
       timeoutMs: 12000
     })
   }
 
-  function stopFollowPlayer(message = 'Je ne suis plus personne.') {
+  function stopFollowPlayer(message = '🟡 Suivi terminé, retour aux occupations.') {
     deps.setFollowTargetUsername(null)
     if (followTimer) {
       clearInterval(followTimer)
@@ -32,13 +32,13 @@ function createFollowHelpers(deps) {
 
   function startFollowPlayer(username) {
     if (deps.isCommandRunning() || deps.isMissionActive()) {
-      deps.safeChat("Je suis deja occupe. Dis stop puis suis moi si tu veux interrompre la mission.", 5000)
+      deps.safeChat("Je suis déjà en mission. Dis stop avant de me faire suivre.", 5000)
       return
     }
 
     const player = playerEntity(username)
     if (!player) {
-      deps.safeChat("Je ne te vois pas, impossible de te suivre pour l'instant.")
+      deps.safeChat("Je ne te vois pas, impossible de te suivre.")
       return
     }
 
@@ -52,7 +52,7 @@ function createFollowHelpers(deps) {
 
       const target = playerEntity(followTargetUsername)
       if (!target) {
-        deps.safeChat("Je ne vois plus le joueur a suivre.", 10000)
+        deps.safeChat('Je ne te vois plus.', 10000)
         return
       }
 
@@ -65,7 +65,7 @@ function createFollowHelpers(deps) {
     }, 1200)
 
     deps.bot.pathfinder.setGoal(new deps.goals.GoalFollow(player, 2), true)
-    deps.safeChat('🚶 Je te suis...')
+    deps.safeChat('🟢 Mode suivi activé, je reste avec toi.')
   }
 
   return {

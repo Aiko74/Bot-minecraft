@@ -13,6 +13,20 @@ const DEFAULT_MINING_STRATEGIES = {
     maxScanCycles: 18,
     finalAction: 'return_base'
   },
+  copper: {
+    mode: 'cave_or_surface',
+    scanRadius: 64,
+    exploreStep: 18,
+    maxScanCycles: 18,
+    finalAction: 'return_base'
+  },
+  emerald: {
+    mode: 'cave_or_surface',
+    scanRadius: 64,
+    exploreStep: 18,
+    maxScanCycles: 22,
+    finalAction: 'return_base'
+  },
   iron: {
     mode: 'cave_or_stair',
     scanRadius: 64,
@@ -56,11 +70,33 @@ const DEFAULT_MINING_STRATEGIES = {
     finalAction: 'return_base',
     dimension: 'nether'
   },
+  netherrack: {
+    mode: 'nether_material',
+    scanRadius: 48,
+    exploreStep: 12,
+    maxScanCycles: 12,
+    finalAction: 'return_base',
+    dimension: 'nether'
+  },
   cobblestone: {
     mode: 'short_tunnel',
     scanRadius: 48,
     exploreStep: 14,
     maxScanCycles: 14,
+    finalAction: 'return_base'
+  },
+  sand: {
+    mode: 'surface',
+    scanRadius: 56,
+    exploreStep: 16,
+    maxScanCycles: 14,
+    finalAction: 'return_base'
+  },
+  dirt: {
+    mode: 'surface',
+    scanRadius: 48,
+    exploreStep: 14,
+    maxScanCycles: 12,
     finalAction: 'return_base'
   },
   default: {

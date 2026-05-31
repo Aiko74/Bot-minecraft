@@ -16,8 +16,10 @@ import {
   Hammer,
   Hexagon,
   Home,
+  Info,
   Layers3,
   Map,
+  Minus,
   MoreHorizontal,
   Palette,
   Plus,
@@ -52,7 +54,8 @@ const views = [
   { id: 'config', label: 'Configuration', icon: Settings },
   { id: 'commands', label: 'Commandes', icon: Terminal },
   { id: 'blueprints', label: 'Blueprints', icon: Boxes },
-  { id: 'logs', label: 'Logs', icon: ScrollText }
+  { id: 'logs', label: 'Logs', icon: ScrollText },
+  { id: 'about', label: 'A propos', icon: Info }
 ]
 
 const themes = [
@@ -100,10 +103,11 @@ const viewTitles = {
   config: 'Configuration Locale',
   commands: 'Bibliotheque Commandes',
   blueprints: 'Atelier Blueprints',
-  logs: 'Flux Systeme'
+  logs: 'Flux Systeme',
+  about: 'Aiko V2'
 }
 
-const appBuildLabel = 'V1-DEV-2026.05'
+const appBuildLabel = 'V2-DEV-2026.05'
 
 const categoryIcons = {
   setup: Home,
@@ -161,12 +165,27 @@ function normalizeTheme(theme) {
 }
 
 function botStateLabel(bot) {
-  if (!bot?.running) return 'deconnecte'
+  if (!bot?.running) return 'hors ligne'
   if (bot.state === 'connected') return 'connecte'
-  if (bot.state === 'error') return 'erreur'
+  if (bot.state === 'error') return 'action requise'
   if (bot.state === 'starting') return 'connexion'
   if (bot.state === 'disconnected') return 'deconnecte'
-  return 'process actif'
+  return 'noyau actif'
+}
+
+function botStateSummary(bot) {
+  if (!bot?.running) return 'Le bot est arrete. Configure le serveur puis lance une session.'
+  if (bot.state === 'connected') return 'Le bot est connecte au serveur et pret a recevoir tes commandes.'
+  if (bot.state === 'error') return bot.lastError || 'Une erreur empeche la session de continuer.'
+  if (bot.state === 'starting') return 'Connexion au serveur en cours...'
+  if (bot.state === 'disconnected') return 'Le processus existe mais la connexion Minecraft est fermee.'
+  return 'Le processus tourne, synchronisation du statut en cours.'
+}
+
+function commandStatus(command) {
+  if (command.status === 'incoming') return { key: 'incoming', label: 'Incoming', text: 'A venir' }
+  if (command.status === 'beta' || command.risk === 'high') return { key: 'beta', label: 'Beta', text: 'Test' }
+  return { key: 'stable', label: 'Stable', text: 'Pret' }
 }
 
 function botIsConnected(bot) {
@@ -367,11 +386,11 @@ function Sidebar({ activeView, setActiveView, botRunning, botConnected, target, 
   )
 }
 
-function Topbar({ activeView, onRefresh, onStart, onStop, botRunning, onOpenSetup }) {
+function Topbar({ activeView, onRefresh, onStart, onStop, botRunning, onOpenSetup, onMinimize, onClose }) {
   return (
     <header className="topbar">
       <div>
-        <p className="eyebrow">Interface locale native</p>
+        <p className="eyebrow">AI Survival Command Center</p>
         <h2>{viewTitles[activeView]}</h2>
       </div>
       <div className="top-actions">
@@ -392,6 +411,10 @@ function Topbar({ activeView, onRefresh, onStart, onStop, botRunning, onOpenSetu
           Stop
         </motion.button>
         <div className={`micro-status ${botRunning ? 'online' : ''}`}>{botRunning ? 'online' : 'idle'}</div>
+        <div className="window-controls">
+          <button type="button" onClick={onMinimize} aria-label="Minimiser"><Minus size={15} /></button>
+          <button type="button" onClick={onClose} aria-label="Fermer"><X size={15} /></button>
+        </div>
       </div>
     </header>
   )
@@ -638,6 +661,7 @@ function BotView({ data, onStart, onStop, onRestart, onRefresh, onTestConnection
   const config = data?.config || {}
   const server = config.server || {}
   const connected = botIsConnected(bot)
+  const stateLabel = botStateLabel(bot)
 
   return (
     <div className="bot-view">
@@ -646,8 +670,13 @@ function BotView({ data, onStart, onStop, onRestart, onRefresh, onTestConnection
           <div className="reactor-ring" />
           <div className="reactor-ring second" />
           <Cpu size={52} />
-          <strong>{botStateLabel(bot).toUpperCase()}</strong>
+          <strong>{stateLabel.toUpperCase()}</strong>
           <span>{bot.startedAt ? `demarre a ${timeText(bot.startedAt)}` : 'pret a lancer'}</span>
+        </div>
+        <div className={`bot-state-card ${bot.state || 'stopped'}`}>
+          <span>Etat session</span>
+          <strong>{stateLabel}</strong>
+          <p>{botStateSummary(bot)}</p>
         </div>
         <div className="button-row">
           <motion.button className="primary-button" onClick={onStart} whileTap={{ scale: 0.97 }}>
@@ -663,7 +692,7 @@ function BotView({ data, onStart, onStop, onRestart, onRefresh, onTestConnection
             <RefreshCcw size={17} /> Sync
           </motion.button>
         </div>
-        {bot.lastError ? <div className="error-box">{bot.lastError}</div> : null}
+        {bot.lastError ? <div className="error-box"><strong>Action conseillee</strong><span>{bot.lastError}</span></div> : null}
       </Panel>
 
       <Panel title="Serveur cible" meta={connected ? 'connexion active' : 'masque hors connexion'}>
@@ -788,7 +817,7 @@ function ConfigView({
   }
 
   return (
-    <div className="config-stack">
+    <div className="config-stack configuration-page">
       <Panel title="Theme visuel" meta="persistant sur cette machine">
         <ThemeGallery theme={theme} onThemeChange={onThemeChange} />
         <div className="performance-row">
@@ -1040,7 +1069,7 @@ function CommandsView({ data, onCopyCommand, onSaveCustomCommands }) {
   }
 
   return (
-    <div>
+    <div className="scroll-view commands-view">
       <Panel title="Commandes rapides custom" meta="copie dans le presse-papiers">
         <div className="custom-command-layout">
           <div className="custom-list">
@@ -1057,7 +1086,7 @@ function CommandsView({ data, onCopyCommand, onSaveCustomCommands }) {
           </div>
           <div className="custom-form">
             <Field label="Nom" value={draft.label} onChange={value => setDraft(current => ({ ...current, label: value }))} />
-            <Field label="Commande Minecraft" value={draft.command} onChange={value => setDraft(current => ({ ...current, command: value }))} />
+            <Field label="Commande bot (sans /)" value={draft.command} onChange={value => setDraft(current => ({ ...current, command: value }))} />
             <button className="primary-button" onClick={addCustomCommand}><Plus size={16} /> Ajouter</button>
           </div>
         </div>
@@ -1072,9 +1101,10 @@ function CommandsView({ data, onCopyCommand, onSaveCustomCommands }) {
       <div className="command-grid">
         {filtered.map((command, index) => {
           const Icon = categoryIcons[command.categoryId] || Terminal
+          const status = commandStatus(command)
           return (
             <motion.article
-              className={`command-card ${command.risk}`}
+              className={`command-card ${command.risk} ${status.key}`}
               key={`${command.categoryId}-${command.name}`}
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1082,11 +1112,10 @@ function CommandsView({ data, onCopyCommand, onSaveCustomCommands }) {
               whileHover={{ y: -5 }}
             >
               <div className="card-icon"><Icon size={18} /></div>
-              {command.status === 'incoming' ? <em className="command-status incoming">Feature incoming</em> : null}
-              {command.status === 'beta' ? <em className="command-status beta">Beta</em> : null}
+              <em className={`command-status ${status.key}`}>{status.label}</em>
               <strong>{command.name}</strong>
               <p>{command.summary}</p>
-              <span>{command.categoryTitle} · {command.status === 'incoming' ? 'a stabiliser' : command.risk}</span>
+              <span>{command.categoryTitle} - {status.text}</span>
             </motion.article>
           )
         })}
@@ -1098,7 +1127,7 @@ function CommandsView({ data, onCopyCommand, onSaveCustomCommands }) {
 function BlueprintsView({ data, onOpenFolder }) {
   const blueprints = data?.blueprints || []
   return (
-    <div>
+    <div className="scroll-view blueprints-view">
       <div className="toolbar">
         <motion.button className="glass-button" onClick={onOpenFolder} whileTap={{ scale: 0.97 }}>
           <FolderOpen size={17} /> Ouvrir le dossier
@@ -1155,6 +1184,57 @@ function LogsView({ data, onRunConsole }) {
           <button className="primary-button" type="submit">Run</button>
         </form>
       </Panel>
+    </div>
+  )
+}
+
+function AboutView({ data, onOpenConfigFolder, onOpenLogsFolder, onOpenProjectFolder }) {
+  const version = data?.version || '2.0.0'
+  const paths = data?.paths || {}
+  const stableCount = (data?.allCommands || []).filter(command => commandStatus(command).key === 'stable').length
+  const betaCount = (data?.allCommands || []).filter(command => commandStatus(command).key === 'beta').length
+  const incomingCount = (data?.allCommands || []).filter(command => commandStatus(command).key === 'incoming').length
+
+  return (
+    <div className="scroll-view about-view">
+      <Panel title="Aiko Assistant 2077" meta={`version ${version}`}>
+        <div className="about-hero">
+          <div>
+            <span className="system-chip">V2 Launcher</span>
+            <h3>AI Survival Command Center</h3>
+            <p>
+              Version test orientee launcher premium pour piloter le bot Minecraft, gerer la configuration locale,
+              consulter les logs et preparer les prochaines fonctions survival.
+            </p>
+          </div>
+          <div className="about-version">
+            <strong>V2</strong>
+            <span>test amis</span>
+          </div>
+        </div>
+      </Panel>
+
+      <section className="about-grid">
+        <Panel title="Statut commandes" meta="lisibilite V2">
+          <div className="status-breakdown">
+            <div><strong>{stableCount}</strong><span>Stable</span></div>
+            <div><strong>{betaCount}</strong><span>Beta</span></div>
+            <div><strong>{incomingCount}</strong><span>Incoming</span></div>
+          </div>
+        </Panel>
+
+        <Panel title="Dossiers locaux" meta="support test">
+          <div className="folder-actions">
+            <button className="glass-button" onClick={onOpenConfigFolder}><FolderOpen size={16} /> Ouvrir config</button>
+            <button className="glass-button" onClick={onOpenLogsFolder}><ScrollText size={16} /> Ouvrir logs</button>
+            <button className="glass-button" onClick={onOpenProjectFolder}><FolderOpen size={16} /> Ouvrir projet</button>
+          </div>
+          <div className="path-list">
+            <span>Config: {paths.configDir || 'local'}</span>
+            <span>Logs: {paths.logsDir || 'local'}</span>
+          </div>
+        </Panel>
+      </section>
     </div>
   )
 }
@@ -1622,6 +1702,11 @@ function App() {
     notify('Commandes custom', 'Liste mise a jour.', 'success')
   }
 
+  const minimizeWindow = () => window.aikoApp.minimizeWindow()
+  const closeWindow = () => window.aikoApp.closeWindow()
+  const openConfigFolder = () => window.aikoApp.openConfigFolder()
+  const openLogsFolder = () => window.aikoApp.openLogsFolder()
+
   const target = serverText(data?.config || {})
   const botRunning = Boolean(data?.bot?.running)
   const connected = botIsConnected(data?.bot)
@@ -1631,7 +1716,7 @@ function App() {
       <ShellBackdrop performanceMode={performanceMode} />
       <Sidebar activeView={activeView} setActiveView={setActiveView} botRunning={botRunning} botConnected={connected} target={target} theme={theme} onThemeChange={changeTheme} />
       <main className="workspace">
-        <Topbar activeView={activeView} onRefresh={refresh} onStart={startBot} onStop={stopBot} botRunning={botRunning} onOpenSetup={openQuickSetup} />
+        <Topbar activeView={activeView} onRefresh={refresh} onStart={startBot} onStop={stopBot} botRunning={botRunning} onOpenSetup={openQuickSetup} onMinimize={minimizeWindow} onClose={closeWindow} />
         <AnimatePresence mode="wait">
           {booting ? (
             <motion.div className="loading" key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -1653,6 +1738,7 @@ function App() {
               {activeView === 'commands' && <CommandsView data={data} onCopyCommand={copyCommand} onSaveCustomCommands={saveCustomCommands} />}
               {activeView === 'blueprints' && <BlueprintsView data={data} onOpenFolder={() => window.aikoApp.openBlueprintFolder()} />}
               {activeView === 'logs' && <LogsView data={data} onRunConsole={runConsole} />}
+              {activeView === 'about' && <AboutView data={data} onOpenConfigFolder={openConfigFolder} onOpenLogsFolder={openLogsFolder} onOpenProjectFolder={() => window.aikoApp.openProjectFolder()} />}
             </motion.section>
           )}
         </AnimatePresence>
@@ -1687,3 +1773,4 @@ function App() {
 }
 
 createRoot(document.getElementById('root')).render(<App />)
+

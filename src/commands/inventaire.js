@@ -9,7 +9,8 @@ module.exports = {
       return
     }
 
-    ctx.say(`🎒 Inventaire du bot : ${countSummaryFromInventory(ctx, 14)}`)
+    ctx.say('🎒 Inventaire du bot :')
+    ctx.say(countSummaryFromInventory(ctx, 14))
   }
 }
 
@@ -28,6 +29,9 @@ function countSummaryFromInventory(ctx, limit = 12) {
         name.includes('coal') ||
         name.includes('redstone') ||
         name.includes('lapis') ||
+        name.includes('copper') ||
+        name.includes('emerald') ||
+        name.includes('ancient_debris') ||
         name.includes('sugar_cane') ||
         name.includes('leather') ||
         name.includes('wool') ||
@@ -37,8 +41,10 @@ function countSummaryFromInventory(ctx, limit = 12) {
         name.includes('mutton') ||
         name.includes('rabbit') ||
         name.includes('cobblestone') ||
-        name.includes('oak_') ||
-        name.includes('sand')
+        name.includes('stone') ||
+        name.includes('dirt') ||
+        name.includes('sand') ||
+        name.includes('_log')
       )
     })
     .sort((a, b) => b[1] - a[1])

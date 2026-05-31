@@ -1,6 +1,39 @@
 function createDangerHelpers(deps) {
+  const nearbyCriticalHazards = new Set([
+    'lava',
+    'fire',
+    'soul_fire',
+    'campfire',
+    'soul_campfire',
+    'powder_snow'
+  ])
+  const retreatOnlyEntities = new Set([
+    'creeper',
+    'warden',
+    'ender_dragon',
+    'wither',
+    'ghast'
+  ])
+  let lastRetreatMessageAt = 0
+
   function blockIsHazard(block) {
     return Boolean(block && deps.hazardBlockNames.includes(block.name))
+  }
+
+  function nearbyCriticalHazardBlock(maxDistance = 2) {
+    const mcData = deps.getMcData && deps.getMcData()
+    if (!mcData || !deps.bot.findBlock) return null
+
+    const ids = [...nearbyCriticalHazards]
+      .map(name => mcData.blocksByName[name] && mcData.blocksByName[name].id)
+      .filter(id => typeof id === 'number')
+
+    if (ids.length === 0) return null
+
+    return deps.bot.findBlock({
+      matching: ids,
+      maxDistance
+    })
   }
 
   function currentHazardBlock() {
@@ -13,19 +46,34 @@ function createDangerHelpers(deps) {
       deps.bot.blockAt(pos.offset(0, -1, 0))
     ]
 
-    return blocks.find(blockIsHazard) || null
+    return blocks.find(blockIsHazard) || nearbyCriticalHazardBlock(2)
   }
 
   function nearestHostile(maxDistance) {
     return deps.bot.nearestEntity(entity => {
       if (!entity || !entity.name || !entity.position) return false
+      if (deps.neutralEntities && deps.neutralEntities.has(entity.name)) return false
       if (!deps.hostileEntities.has(entity.name)) return false
       return entity.position.distanceTo(deps.bot.entity.position) <= maxDistance
     })
   }
 
+  function isNeutralEntity(entity) {
+    return Boolean(entity && entity.name && deps.neutralEntities && deps.neutralEntities.has(entity.name))
+  }
+
+  function shouldRetreatOnly(entity) {
+    return Boolean(entity && entity.name && (retreatOnlyEntities.has(entity.name) || deps.unfightableEntities.has(entity.name)))
+  }
+
   async function retreatFrom(position, reason) {
-    deps.safeChat(`${reason}: esquive.`, 5000)
+    if (deps.isStopRequested()) return false
+
+    const now = Date.now()
+    if (now - lastRetreatMessageAt > 5000) {
+      deps.safeChat(`${reason}: esquive.`, 5000)
+      lastRetreatMessageAt = now
+    }
     deps.bot.pathfinder.setGoal(null)
 
     const current = deps.bot.entity.position
@@ -39,28 +87,45 @@ function createDangerHelpers(deps) {
     const targetX = current.x + awayX * 14 + (Math.random() * 6 - 3)
     const targetZ = current.z + awayZ * 14 + (Math.random() * 6 - 3)
 
-    await deps.safeGoto(new deps.goals.GoalNear(targetX, current.y, targetZ, 3), 'esquive', {
+    const reached = await deps.safeGoto(new deps.goals.GoalNear(targetX, current.y, targetZ, 3), 'esquive', {
       attempts: 1,
-      timeoutMs: 8000,
-      ignoreStop: true
+      timeoutMs: 5000,
+      canDig: false,
+      canPlace: false,
+      quiet: true
     })
+
+    if (reached || deps.isStopRequested()) return reached
+
+    deps.bot.setControlState('back', true)
+    deps.bot.setControlState('jump', true)
+    await deps.sleep(900)
+    deps.bot.setControlState('back', false)
+    deps.bot.setControlState('jump', false)
+    return false
   }
 
   async function fightHostile(hostile) {
     if (!hostile || !hostile.isValid || deps.isCombatRunning()) return false
+    if (isNeutralEntity(hostile)) {
+      console.log(`[danger] neutral mob ignored ${hostile.name}`)
+      return false
+    }
     if (deps.bot.health > 0 && deps.bot.health <= deps.config.healthReturnAt) return false
+    if (deps.isStopRequested()) return false
 
     deps.setCombatRunning(true)
 
     try {
       const distance = hostile.position.distanceTo(deps.bot.entity.position)
 
-      if (deps.unfightableEntities.has(hostile.name) && distance <= deps.config.hostileCriticalDistance + 2) {
+      if (shouldRetreatOnly(hostile)) {
         await retreatFrom(hostile.position, `Mob trop dangereux ${hostile.name}`)
         return false
       }
 
-      const armed = await deps.ensureCombatGear()
+      const armed = await deps.ensureCombatGear({ allowBaseTrip: false })
+      if (deps.isStopRequested()) return false
       if (!armed) {
         await retreatFrom(hostile.position, "Pas d'arme de combat")
         return false
@@ -78,7 +143,9 @@ function createDangerHelpers(deps) {
         hits < 18
       ) {
         await deps.food.autoEat()
+        if (deps.isStopRequested()) break
         await deps.tools.equipWeapon()
+        if (deps.isStopRequested()) break
 
         const currentDistance = hostile.position.distanceTo(deps.bot.entity.position)
         if (currentDistance > 3) {
@@ -123,15 +190,21 @@ function createDangerHelpers(deps) {
         return false
       }
 
+      if (deps.isStopRequested()) return false
+
       if (deps.oxygen.shouldEscapeForOxygen()) {
         await deps.oxygen.escapeWater()
         return false
       }
 
+      if (deps.isStopRequested()) return false
+
       const ate = await deps.food.autoEat()
+      if (deps.isStopRequested()) return false
       if (!ate && deps.bot.food <= deps.config.foodCriticalAt && allowReturn && deps.getBasePos()) {
         deps.safeChat('Plus assez de nourriture, retour base.', 8000)
         await deps.safeGoBase()
+        if (deps.isStopRequested()) return false
         await deps.chests.takeLoadoutFromChest()
         await deps.food.autoEat(true)
         return false
@@ -158,6 +231,11 @@ function createDangerHelpers(deps) {
       const hostile = nearestHostile(deps.config.hostileDistance)
       if (hostile) {
         const distance = hostile.position.distanceTo(deps.bot.entity.position)
+        if (shouldRetreatOnly(hostile)) {
+          await retreatFrom(hostile.position, `Mob dangereux ${hostile.name}`)
+          return false
+        }
+
         if (!deps.getDefendMode()) {
           if (distance <= deps.config.hostileCriticalDistance || hostile.name === 'creeper') {
             await retreatFrom(hostile.position, `Mob proche ${hostile.name}`)
@@ -167,12 +245,8 @@ function createDangerHelpers(deps) {
           return true
         }
 
-        if (distance <= deps.config.hostileCriticalDistance || hostile.name === 'creeper') {
-          if (hostile.name === 'creeper' && distance <= deps.config.hostileCriticalDistance) {
-            await retreatFrom(hostile.position, `Mob dangereux ${hostile.name}`)
-          } else {
-            await fightHostile(hostile)
-          }
+        if (distance <= deps.config.hostileCriticalDistance) {
+          await fightHostile(hostile)
           return false
         }
 

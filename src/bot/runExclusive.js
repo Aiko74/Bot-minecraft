@@ -29,7 +29,7 @@ function createRunExclusive(deps) {
       if (currentMission) {
         currentMission.status = 'paused'
         deps.saveMission()
-        deps.safeChat('Erreur pendant la commande, mission mise en pause. Corrige le probleme puis dis reprendre.')
+        deps.safeChat('Erreur pendant la commande. Je repasse en état stable.')
       } else {
         deps.safeChat('Erreur pendant la commande, retour a un etat stable.')
       }

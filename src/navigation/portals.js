@@ -32,6 +32,82 @@ function createPortalHelpers(deps) {
     return Boolean(block && block.name === 'nether_portal')
   }
 
+  function isLavaLikeBlock(block) {
+    if (!block || !block.name) return false
+    return block.name === 'lava' || block.name === 'flowing_lava' || block.name === 'fire' || block.name === 'soul_fire'
+  }
+
+  function isAirLike(block) {
+    if (!block) return false
+    return block.boundingBox === 'empty' || block.name === 'air' || block.name === 'cave_air' || block.name === 'void_air'
+  }
+
+  function hasLavaNear(pos) {
+    if (!deps.isValidPos(pos)) return true
+
+    const offsets = [
+      [0, 0, 0],
+      [0, 1, 0],
+      [0, 2, 0],
+      [1, 0, 0],
+      [-1, 0, 0],
+      [0, 0, 1],
+      [0, 0, -1],
+      [1, 1, 0],
+      [-1, 1, 0],
+      [0, 1, 1],
+      [0, 1, -1]
+    ]
+
+    return offsets.some(([dx, dy, dz]) => isLavaLikeBlock(deps.bot.blockAt(pos.offset(dx, dy, dz))))
+  }
+
+  function isSafeStandPos(pos) {
+    if (!deps.isValidPos(pos)) return false
+
+    const floor = deps.bot.blockAt(pos.offset(0, -1, 0))
+    const feet = deps.bot.blockAt(pos)
+    const head = deps.bot.blockAt(pos.offset(0, 1, 0))
+
+    if (!floor || floor.boundingBox !== 'block' || isLavaLikeBlock(floor)) return false
+    if (!isAirLike(feet) || !isAirLike(head)) return false
+    if (hasLavaNear(pos)) return false
+
+    return true
+  }
+
+  function portalExitCandidates(portalPos, minDistance = 8) {
+    const candidates = []
+    const distances = [3, 5, 7, Math.min(Math.max(minDistance, 8), 12)]
+    const directions = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+      [1, 1],
+      [1, -1],
+      [-1, 1],
+      [-1, -1]
+    ]
+
+    for (const distance of distances) {
+      for (const [dx, dz] of directions) {
+        const length = Math.sqrt(dx * dx + dz * dz) || 1
+        const x = Math.round(portalPos.x + (dx / length) * distance)
+        const z = Math.round(portalPos.z + (dz / length) * distance)
+
+        for (let dy = -1; dy <= 1; dy++) {
+          const pos = new Vec3(x, Math.floor(portalPos.y) + dy, z)
+          if (isSafeStandPos(pos)) candidates.push(pos)
+        }
+      }
+    }
+
+    return candidates
+      .filter((pos, index, list) => list.findIndex(other => other.equals(pos)) === index)
+      .sort((a, b) => a.distanceTo(deps.bot.entity.position) - b.distanceTo(deps.bot.entity.position))
+  }
+
   function savedPortalForDimension(dimension = currentDimension()) {
     const portals = deps.getNetherPortals()
     const pos = portals && portals[dimension]
@@ -141,12 +217,14 @@ function createPortalHelpers(deps) {
     if (!portal) portal = findNearestNetherPortal(options.searchRadius || 56)
     if (!portal && savedPos) {
       deps.safeChat('Je retourne vers le portail Nether memorise.', 9000)
+      console.log(`[portal] retour portail memorise ${savedPos.x} ${savedPos.y} ${savedPos.z} distance=${Math.round(deps.bot.entity.position.distanceTo(savedPos))}`)
+
       await deps.travelToPosition(savedPos, 'portail nether memorise', {
         finalRange: 8,
-        stepDistance: 12,
-        maxSteps: 48,
-        timeoutMs: 9000,
-        canDig: true,
+        stepDistance: 18,
+        maxSteps: 80,
+        timeoutMs: 8000,
+        canDig: false,
         safeToBreak: deps.canBreakForPath,
         quiet: true
       })
@@ -154,7 +232,19 @@ function createPortalHelpers(deps) {
       if (deps.bot.entity.position.distanceTo(savedPos) > 10 && deps.digTowardPosition) {
         await deps.digTowardPosition(savedPos, 'tunnel portail nether memorise', {
           range: 8,
-          maxSteps: 96,
+          maxSteps: 160,
+          quiet: true
+        })
+      }
+
+      if (deps.bot.entity.position.distanceTo(savedPos) > 10) {
+        await deps.travelToPosition(savedPos, 'portail nether memorise', {
+          finalRange: 8,
+          stepDistance: 12,
+          maxSteps: 48,
+          timeoutMs: 9000,
+          canDig: true,
+          safeToBreak: deps.canBreakForPath,
           quiet: true
         })
       }
@@ -205,6 +295,22 @@ function createPortalHelpers(deps) {
     if (!portal) return true
     if (portal.position.distanceTo(deps.bot.entity.position) >= minDistance) return true
 
+    console.log(`[portal] sortie portail distance=${Math.round(portal.position.distanceTo(deps.bot.entity.position))}`)
+
+    const candidates = portalExitCandidates(portal.position, minDistance)
+    for (const candidate of candidates.slice(0, 8)) {
+      const reached = await deps.safeGoto(new deps.goals.GoalNear(candidate.x, candidate.y, candidate.z, 1), 'sortie portail nether', {
+        attempts: 1,
+        timeoutMs: 4500,
+        canDig: false,
+        canPlace: false,
+        quiet: true,
+        successCheck: () => deps.bot.entity.position.distanceTo(candidate) <= 1.8
+      })
+
+      if (reached || portal.position.distanceTo(deps.bot.entity.position) >= 6) return true
+    }
+
     let dx = deps.bot.entity.position.x - portal.position.x
     let dz = deps.bot.entity.position.z - portal.position.z
     let length = Math.sqrt(dx * dx + dz * dz)
@@ -220,15 +326,27 @@ function createPortalHelpers(deps) {
     const target = deps.bot.entity.position.offset(dx * minDistance, 0, dz * minDistance)
     const reached = await deps.travelToPosition(target, 'sortie portail nether', {
       finalRange: 5,
-      stepDistance: 10,
-      maxSteps: 8,
-      timeoutMs: 7000,
+      stepDistance: 8,
+      maxSteps: 10,
+      timeoutMs: 5500,
       canDig: true,
       safeToBreak: deps.canBreakForPath,
       quiet: true
     })
 
-    return reached || portal.position.distanceTo(deps.bot.entity.position) >= 8
+    if (reached || portal.position.distanceTo(deps.bot.entity.position) >= 8) return true
+
+    try {
+      await deps.bot.lookAt(deps.bot.entity.position.offset(dx * 4, 0, dz * 4), true)
+      deps.bot.setControlState('forward', true)
+      deps.bot.setControlState('jump', true)
+      await deps.sleep(900)
+    } finally {
+      deps.bot.setControlState('forward', false)
+      deps.bot.setControlState('jump', false)
+    }
+
+    return portal.position.distanceTo(deps.bot.entity.position) >= 5
   }
 
   return {

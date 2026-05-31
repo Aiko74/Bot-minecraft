@@ -3,8 +3,6 @@ module.exports = {
   aliases: ['mange', 'eat'],
   intentTypes: ['eat'],
   run: async ctx => {
-    await ctx.helpers.runExclusive(async () => {
-      await ctx.helpers.forceEat()
-    })
+    ctx.say('🍗 Mange est automatique en V2. Je mangerai quand ce sera utile.')
   }
 }

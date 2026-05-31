@@ -4,6 +4,7 @@ const commandCategories = [
     title: 'Configuration',
     tone: 'Base, farms, memoire',
     commands: [
+      { name: 'chat sans slash', summary: 'Commande correcte: stop. Incorrect: /stop.', risk: 'safe' },
       { name: 'setbase', summary: 'Enregistre la base et le coffre proche.', risk: 'safe' },
       { name: 'base', summary: 'Affiche la base enregistree.', risk: 'safe' },
       { name: 'setfarm animaux', summary: 'Enregistre la zone animaux et son coffre.', risk: 'safe' },
@@ -19,10 +20,8 @@ const commandCategories = [
     title: 'Missions',
     tone: 'Controle et etat',
     commands: [
-      { name: 'status', summary: 'Affiche vie, faim, inventaire, base, farms et mission.', risk: 'safe' },
+      { name: 'status', summary: 'Affiche vie, faim, inventaire et mission.', risk: 'safe' },
       { name: 'mission', summary: 'Affiche la mission en cours ou sauvegardee.', risk: 'safe' },
-      { name: 'pause', summary: 'Met la mission en pause.', risk: 'safe' },
-      { name: 'reprendre', summary: 'Reprend la mission en pause.', risk: 'medium' },
       { name: 'stop', summary: 'Annule la mission courante.', risk: 'safe' },
       { name: 'annule', summary: 'Alias de stop.', risk: 'safe' }
     ]
@@ -37,9 +36,7 @@ const commandCategories = [
       { name: 'range', summary: 'Range le surplus en gardant nourriture, outils et armure.', risk: 'medium' },
       { name: 'depot forcer', summary: 'Depose aussi l equipement porte.', risk: 'medium' },
       { name: 'prepare', summary: 'Prend nourriture, outils et armure.', risk: 'medium' },
-      { name: 'mange', summary: 'Action manuelle, le bot mange aussi automatiquement.', risk: 'safe' },
-      { name: 'sleep', summary: 'Dort dans un lit proche si possible.', risk: 'medium' },
-      { name: 'defend on/off', summary: 'Option avancee, la survie automatique reste active.', risk: 'medium' }
+      { name: 'sleep', summary: 'Dort dans un lit proche si possible.', risk: 'medium' }
     ]
   },
   {
@@ -63,8 +60,16 @@ const commandCategories = [
       { name: 'mine 64 fer', summary: 'Mine du fer, loin de la base si possible.', risk: 'high' },
       { name: 'mine 32 charbon', summary: 'Mine du charbon.', risk: 'high' },
       { name: 'mine 10 diamant', summary: 'Mine du diamant.', risk: 'high' },
-      { name: 'mine 128 pierre', summary: 'Collecte de la pierre/cobblestone.', risk: 'high' },
-      { name: 'mine 20 bois', summary: 'Collecte du bois loin de la base puis depose.', risk: 'high' },
+      { name: 'mine 32 cuivre', summary: 'Mine du cuivre.', risk: 'high' },
+      { name: 'mine 8 emeraude', summary: 'Mine de l emeraude.', risk: 'high' },
+      { name: 'mine 64 quartz', summary: 'Mine du quartz dans le Nether.', risk: 'high', status: 'beta' },
+      { name: 'mine 64 nether gold', summary: 'Mine de l or du Nether.', risk: 'high', status: 'beta' },
+      { name: 'mine 8 ancient debris', summary: 'Mine ancient debris dans le Nether.', risk: 'high', status: 'beta' },
+      { name: 'collect 64 netherrack', summary: 'Collecte de la netherrack.', risk: 'high', status: 'beta' },
+      { name: 'collect 128 pierre', summary: 'Collecte de la pierre/cobblestone.', risk: 'high' },
+      { name: 'collect 20 bois', summary: 'Collecte du bois loin de la base puis depose.', risk: 'high' },
+      { name: 'collect 64 sable', summary: 'Collecte du sable.', risk: 'high' },
+      { name: 'collect 64 terre', summary: 'Collecte de la terre.', risk: 'high' },
       { name: 'coupe des arbres', summary: 'Collecte du bois, 64 par defaut.', risk: 'high' },
       { name: 'chasse 5', summary: 'Chasse des animaux proches.', risk: 'high' },
       { name: 'explore', summary: 'Explore autour de la base puis revient.', risk: 'high' }

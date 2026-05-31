@@ -11,6 +11,40 @@ function createMissionRuntime(deps) {
     deps.saveMemory()
   }
 
+  function depositSucceeded(result) {
+    return Boolean(result && (result.ok || result.depositedCount > 0 || result.startingCount === 0))
+  }
+
+  function targetDepositLabel(target) {
+    const labels = {
+      ancient_debris: 'Ancient debris',
+      coal: 'Charbon',
+      copper: 'Cuivre',
+      diamond: 'Diamant',
+      emerald: 'Émeraude',
+      gold: 'Or',
+      iron: 'Fer',
+      lapis: 'Lapis',
+      nether_gold: 'Or du Nether',
+      netherrack: 'Netherrack',
+      quartz: 'Quartz',
+      redstone: 'Redstone',
+      wood: 'Bois',
+      cobblestone: 'Pierre',
+      sand: 'Sable',
+      dirt: 'Terre'
+    }
+
+    return labels[target && target.key] || (target && target.label) || 'Ressource'
+  }
+
+  function logDepositFinal(stored, success, targetDepositedCount, targetRemaining) {
+    const opened = Boolean(stored && stored.opened)
+    const depositedCount = stored && typeof stored.depositedCount === 'number' ? stored.depositedCount : 0
+    const remaining = stored && typeof stored.remaining === 'number' ? stored.remaining : 'unknown'
+    console.log(`[deposit-final] opened=${opened} depositedCount=${depositedCount} remaining=${remaining} targetDeposited=${targetDepositedCount} targetRemaining=${targetRemaining} success=${success}`)
+  }
+
   function createMission(type, options = {}) {
     deps.logMission(`start ${type}`)
     const mission = {
@@ -52,11 +86,11 @@ function createMissionRuntime(deps) {
     saveMission()
   }
 
-  function finishMission() {
+  function finishMission(options = {}) {
     const currentMission = deps.getCurrentMission()
     if (!currentMission) return
     deps.logMission(`finish ${missionLabel()}`)
-    deps.safeChat(`Mission terminee: ${missionLabel()}.`)
+    if (!options.quiet) deps.safeChat('✅ Mission terminée.')
     deps.setCurrentMission(null)
     deps.setMissionActive(false)
     deps.setStopRequested(false)
@@ -79,30 +113,52 @@ function createMissionRuntime(deps) {
     deps.safeChat(reason)
   }
 
-  async function depositForMission(reason = 'Depot mission.') {
+  function formatDepositMissionResult(result, details) {
+    return details ? result : result.ok
+  }
+
+  async function depositForMission(reason = 'Dépôt mission.', options = {}) {
     if (!deps.getBasePos()) {
-      pauseMission("Base non definie. Dis 'setbase' pres du coffre puis 'reprendre'.")
-      return false
+      pauseMission('Base non définie. Fais setbase puis relance la commande.')
+      return formatDepositMissionResult({ ok: false }, options.details === true)
     }
 
     const currentMission = deps.getCurrentMission()
-    const target = currentMission && currentMission.type === 'mine'
+    const target = currentMission && (currentMission.type === 'mine' || currentMission.type === 'collect')
       ? deps.resourceTargetByKey(currentMission.targetKey)
       : null
     const itemsBefore = target ? deps.countItems(target.drops) : 0
 
-    deps.safeChat(reason, 5000)
+    if (reason) deps.safeChat(reason, 5000)
 
-    const reached = await deps.safeGoBase({ force: true })
-    if (!reached) {
-      pauseMission("Impossible de revenir a la base. Mission en pause.")
-      return false
+    const reached = await deps.safeGoBase({ force: true, quiet: true })
+    if (deps.isStopRequested()) {
+      return formatDepositMissionResult({ ok: false, cancelled: true }, options.details === true)
     }
 
-    const stored = await deps.storeItems()
-    if (!stored) {
-      pauseMission("Depot impossible. Verifie le coffre de base puis dis 'reprendre'.")
-      return false
+    const finalAtBase = reached || (deps.isNearBase && deps.isNearBase(10))
+    if (!finalAtBase) {
+      pauseMission('Retour base impossible. Mission stoppée proprement.')
+      return formatDepositMissionResult({ ok: false }, options.details === true)
+    }
+
+    const stored = await deps.storeItems({ baseOnly: true, details: true, quiet: true })
+    const itemsAfter = target ? deps.countItems(target.drops) : 0
+    const targetDepositedCount = target ? Math.max(0, itemsBefore - itemsAfter) : 0
+    const targetItemsDeposited = Boolean(target && itemsBefore > 0 && (targetDepositedCount > 0 || itemsAfter === 0))
+    const success = depositSucceeded(stored) || targetItemsDeposited
+
+    logDepositFinal(stored, success, targetDepositedCount, itemsAfter)
+
+    if (!success) {
+      pauseMission('Dépôt impossible. Vérifie le coffre de base puis relance la commande.')
+      return formatDepositMissionResult({
+        ok: false,
+        stored,
+        target,
+        targetDepositedCount,
+        targetRemaining: itemsAfter
+      }, options.details === true)
     }
 
     const updatedMission = deps.getCurrentMission()
@@ -110,15 +166,24 @@ function createMissionRuntime(deps) {
       updatedMission.trips = (updatedMission.trips || 0) + 1
 
       if (target) {
-        const itemsAfter = deps.countItems(target.drops)
-        updatedMission.deposited = (updatedMission.deposited || 0) + Math.max(0, itemsBefore - itemsAfter)
+        updatedMission.deposited = (updatedMission.deposited || 0) + targetDepositedCount
       }
 
       saveMission()
     }
 
-    await deps.takeLoadoutFromChest()
-    return true
+    if (target && targetDepositedCount > 0 && options.announceDeposit !== false) {
+      deps.safeChat(`📦 ${targetDepositLabel(target)} déposé : ${targetDepositedCount}.`, 6000)
+    }
+
+    await deps.takeLoadoutFromChest({ baseOnly: true, quiet: true })
+    return formatDepositMissionResult({
+      ok: true,
+      stored,
+      target,
+      targetDepositedCount,
+      targetRemaining: itemsAfter
+    }, options.details === true)
   }
 
   async function finalizeMissionWithBaseDeposit(mission, reason) {
@@ -127,14 +192,19 @@ function createMissionRuntime(deps) {
     await deps.collectNearbyDrops(8)
 
     if (!deps.getBasePos()) {
-      deps.safeChat(`${reason} Base non definie, je ne peux pas deposer automatiquement.`)
+      deps.safeChat(`${reason} Base non définie, je ne peux pas déposer automatiquement.`)
       finishMission()
       return true
     }
 
-    const deposited = await depositForMission(reason || 'Retour base et depot.')
-    if (deposited && deps.getCurrentMission() === mission && !deps.isStopRequested()) {
-      finishMission()
+    const deposited = await depositForMission(null, { details: true, announceDeposit: false })
+    if (deposited.ok && deps.getCurrentMission() === mission && !deps.isStopRequested()) {
+      deps.safeChat('✅ Mission terminée.')
+      if (deposited.target && deposited.targetDepositedCount > 0) {
+        deps.safeChat(`📦 ${targetDepositLabel(deposited.target)} déposé : ${deposited.targetDepositedCount}.`)
+      }
+      deps.safeChat('🏠 Retour à la base.', 6000)
+      finishMission({ quiet: true })
       return true
     }
 
@@ -142,9 +212,9 @@ function createMissionRuntime(deps) {
   }
 
   async function recoverAtBase(reason) {
-    deps.safeChat(`${reason}, retour securite base.`, 8000)
+    deps.safeChat(`${reason}, retour sécurité base.`, 8000)
 
-    const deposited = await depositForMission('Depot securite avant reprise.')
+    const deposited = await depositForMission('Dépôt sécurité avant reprise.')
     if (!deposited) return false
 
     await deps.food.autoEat(true)

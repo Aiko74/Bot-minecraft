@@ -10,6 +10,18 @@ function createRuntimeMemory(deps) {
     deps.setBuildSite(memory.buildSite)
     deps.setCurrentMission(memory.currentMission)
     deps.setAutomationState(memory.automation || { lastAnimalFarmDay: null, nextAnimalFarmDay: null })
+    if (memory.ignoredWorldMemory) {
+      console.log(memory.legacyWorldMemory
+        ? '[memory] ancienne memoire sans serveur ignoree en V2'
+        : '[memory] memoire ignoree: serveur/port different')
+      saveMemory()
+      return
+    }
+
+    if (memory.ignoredMission) {
+      console.log('[mission] ancienne mission ignoree en V2')
+      saveMemory()
+    }
   }
 
   function saveMemory() {

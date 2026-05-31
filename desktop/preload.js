@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('aikoApp', {
   runConsoleCommand: command => ipcRenderer.invoke('desktop:console', command),
   openBlueprintFolder: () => ipcRenderer.invoke('folder:blueprints'),
   openProjectFolder: () => ipcRenderer.invoke('folder:project'),
+  openConfigFolder: () => ipcRenderer.invoke('folder:config'),
+  openLogsFolder: () => ipcRenderer.invoke('folder:logs'),
+  minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
+  closeWindow: () => ipcRenderer.invoke('window:close'),
   onBotLog: callback => {
     const listener = (_event, value) => callback(value)
     ipcRenderer.on('bot:log', listener)

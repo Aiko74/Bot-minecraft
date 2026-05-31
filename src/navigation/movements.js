@@ -21,6 +21,10 @@ function createDefaultMovements(deps) {
     move.entitiesToAvoid.add(entityName)
   }
 
+  for (const entityName of deps.neutralEntities || []) {
+    move.entitiesToAvoid.add(entityName)
+  }
+
   return move
 }
 
